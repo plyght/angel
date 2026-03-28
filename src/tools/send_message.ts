@@ -14,7 +14,7 @@ export const sendMessageTool: Tool = {
   parameters: {
     type: "object",
     properties: {
-      channel: { type: "string", description: "Channel name (e.g., 'discord', 'slack', 'imessage', 'signal', 'web')" },
+      channel: { type: "string", description: "Channel name (e.g., 'discord', 'slack', 'imessage', 'signal')" },
       chat_id: { type: "string", description: "External chat ID for the target channel" },
       text: { type: "string", description: "Message text to send" },
     },

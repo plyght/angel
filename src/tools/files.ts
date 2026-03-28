@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { join, dirname, resolve, relative } from "path";
 import { Glob } from "bun";
 
-const BLOCKED_PATHS = [".ssh", ".aws", ".gnupg", "credentials", ".env"];
+const BLOCKED_PATHS = [".ssh", ".aws", ".gnupg", "credentials", ".env", "angel.config", ".angel/angel.config"];
 
 function isPathBlocked(filePath: string): boolean {
   const normalized = filePath.toLowerCase();

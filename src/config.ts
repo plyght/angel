@@ -26,12 +26,6 @@ export interface SignalConfig extends ChannelConfig {
   signal_cli_path?: string;
 }
 
-export interface WebConfig extends ChannelConfig {
-  port?: number;
-  host?: string;
-  auth_password?: string;
-}
-
 export interface MemoryConfig {
   reflector_enabled: boolean;
   reflector_interval_ms: number;
@@ -59,7 +53,6 @@ export interface AngelConfig {
   soul_md_path?: string;
   timezone: string;
   channels: {
-    web?: WebConfig;
     imessage?: iMessageConfig;
     discord?: DiscordConfig;
     slack?: SlackConfig;
@@ -87,9 +80,7 @@ export const DEFAULTS: AngelConfig = {
   working_dir_isolation: "per_chat",
   data_dir: DEFAULT_DATA_DIR,
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-  channels: {
-    web: { enabled: true, port: 3000, host: "127.0.0.1" },
-  },
+  channels: {},
   memory: {
     reflector_enabled: true,
     reflector_interval_ms: 15 * 60 * 1000,

@@ -3,7 +3,6 @@ import { getDb, upsertChat } from "./db";
 import { processMessage } from "./agent";
 import { ToolRegistry } from "./tools/registry";
 import { ChannelRegistry, splitMessage } from "./channels/types";
-import { WebChannel } from "./channels/web";
 import { bashTool } from "./tools/bash";
 import { fileTools } from "./tools/files";
 import { webTools } from "./tools/web";
@@ -16,8 +15,6 @@ import { browserTool } from "./tools/browser";
 import { handleCommand } from "./commands";
 import { handleExplicitMemory, scheduleReflector } from "./memory";
 import { startScheduler } from "./scheduler";
-import { startWebServer } from "./web/server";
-import { startAcpServer } from "./web/acp";
 import { initMcpServers, shutdownMcpServers } from "./mcp";
 import { discoverSkills } from "./skills";
 import { loadPlugins } from "./plugins";
@@ -41,10 +38,6 @@ switch (command) {
 
   case "version":
     console.log("Angel v0.1.0");
-    break;
-
-  case "acp":
-    await bootAcp();
     break;
 
   case "start":
@@ -90,9 +83,6 @@ async function boot() {
   registry.registerMany(pluginTools);
 
   setSendMessageDeps(channels, db);
-
-  const webChannel = new WebChannel();
-  channels.register(webChannel);
 
   if (config.channels.imessage?.enabled) {
     channels.register(new iMessageChannel());
@@ -160,9 +150,6 @@ async function boot() {
         config,
         registry,
         isOnboarding: !!isOnboarding,
-        onTextDelta: channelName === "web" ? (delta) => (webChannel as WebChannel).sendTextDelta(msg.externalChatId, delta) : undefined,
-        onToolStart: channelName === "web" ? (name, input) => (webChannel as WebChannel).sendToolEvent(msg.externalChatId, "tool_start", { name }) : undefined,
-        onToolResult: channelName === "web" ? (name, result) => (webChannel as WebChannel).sendToolEvent(msg.externalChatId, "tool_result", { name, result: result.slice(0, 200) }) : undefined,
       }, image);
 
       if (typingInterval) clearInterval(typingInterval);
@@ -188,8 +175,6 @@ async function boot() {
 
   await channels.startAll(messageHandler);
 
-  startWebServer(db, config, registry, channels, webChannel);
-
   startScheduler(db, config, registry, channels);
 
   console.log(`[angel] Started with ${registry.count()} tools, ${channels.all().length} channels`);
@@ -202,16 +187,3 @@ async function boot() {
   });
 }
 
-async function bootAcp() {
-  const config = loadConfig();
-  const db = getDb(config.data_dir);
-  const registry = new ToolRegistry();
-
-  registry.register(bashTool);
-  registry.registerMany(fileTools);
-  registry.registerMany(webTools);
-  registry.registerMany(miscTools);
-  registry.registerMany(memoryTools);
-
-  await startAcpServer(db, config, registry);
-}
