@@ -18,17 +18,41 @@ export interface AgentOptions {
   onToolStart?: (name: string, input: any) => void;
   onToolResult?: (name: string, result: string) => void;
   sendIntermediate?: (text: string) => Promise<void>;
+  isOnboarding?: boolean;
 }
 
-export async function processMessage(userMessage: string, opts: AgentOptions): Promise<string> {
+export async function processMessage(userMessage: string, opts: AgentOptions, image?: { base64: string; mimeType: string }): Promise<string> {
   const { chatId, channel, db, config, registry } = opts;
 
   const sessionJson = loadSession(db, chatId);
   let messages: LlmMessage[] = sessionJson ? JSON.parse(sessionJson) : [];
 
-  const systemPrompt = buildSystemPrompt(config, chatId, channel, db, registry);
+  let systemPrompt = buildSystemPrompt(config, chatId, channel, db, registry);
 
-  messages.push({ role: "user", content: userMessage });
+  if (opts.isOnboarding) {
+    systemPrompt += `\n\n<onboarding>
+This is a new user you haven't met before. Get to know them naturally in conversation. Over the course of one or a few messages, learn:
+- Their name and what they like to be called
+- What they do (work, school, interests)
+- What they'd like you to help them with
+- How they'd like to communicate (casual, formal, etc.)
+- Their timezone if not already known
+
+Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Use the store_memory tool with category "profile" to save what you learn. Once you have a good picture, tell them you're all set and they can ask you anything.
+</onboarding>`;
+  }
+
+  if (image) {
+    messages.push({
+      role: "user",
+      content: [
+        { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
+        { type: "text", text: userMessage || "What's in this image?" },
+      ] as any,
+    });
+  } else {
+    messages.push({ role: "user", content: userMessage });
+  }
 
   if (messages.length > config.compaction_threshold) {
     messages = await compactMessages(messages, config);

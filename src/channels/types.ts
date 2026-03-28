@@ -5,6 +5,7 @@ export interface IncomingMessage {
   text: string;
   imageBase64?: string;
   imageMimeType?: string;
+  audioTranscription?: string;
   isGroupMention?: boolean;
   replyToMessageId?: string;
 }

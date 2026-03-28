@@ -20,9 +20,11 @@ export function handleCommand(text: string, chatId: number, db: Database, config
         handled: true,
         text: `Available commands:
 /help — Show this help
+/new — Start a new chat session
 /model [name] — Show or change current model
 /memory — Show stored memories
 /usage — Show token usage stats
+/settings — Show current settings
 /clear — Clear session history
 /version — Show version`,
       };
@@ -54,6 +56,25 @@ export function handleCommand(text: string, chatId: number, db: Database, config
         text: stats.map((s: any) =>
           `${s.model}: ${s.calls} calls, ${s.total_input} input tokens, ${s.total_output} output tokens`
         ).join("\n"),
+      };
+
+    case "/new":
+      db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
+      db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
+      return { handled: true, text: "New chat started." };
+
+    case "/settings":
+      const enabledChannels = Object.entries(config.channels)
+        .filter(([_, v]: [string, any]) => v?.enabled !== false)
+        .map(([k]) => k);
+      return {
+        handled: true,
+        text: `Model: ${config.model}
+Max tokens: ${config.max_tokens}
+Max tool iterations: ${config.max_tool_iterations}
+History messages: ${config.max_history_messages}
+Timezone: ${config.timezone}
+Channels: ${enabledChannels.join(", ")}`,
       };
 
     case "/clear":

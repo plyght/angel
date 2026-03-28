@@ -124,6 +124,21 @@ async function boot() {
       return;
     }
 
+    const onboarded = db.query("SELECT value FROM db_meta WHERE key = 'onboarded'").get() as { value: string } | null;
+    if (!onboarded) {
+      const msgCount = db.query("SELECT COUNT(*) as count FROM messages WHERE chat_id = ?").get(chatId) as { count: number };
+      if (msgCount.count === 0) {
+        db.run("INSERT OR REPLACE INTO db_meta (key, value) VALUES ('onboarding_chat', ?)", [String(chatId)]);
+      }
+      const onboardingChat = db.query("SELECT value FROM db_meta WHERE key = 'onboarding_chat'").get() as { value: string } | null;
+      if (onboardingChat && parseInt(onboardingChat.value) === chatId) {
+        const memories = db.query("SELECT COUNT(*) as count FROM memories WHERE category = 'profile'").get() as { count: number };
+        if (memories.count >= 3) {
+          db.run("INSERT OR REPLACE INTO db_meta (key, value) VALUES ('onboarded', '1')");
+        }
+      }
+    }
+
     const channelName = msg.chatType.split("_")[0];
     const adapter = channels.get(channelName);
 
@@ -134,16 +149,21 @@ async function boot() {
     }
 
     try {
+      const image = msg.imageBase64 ? { base64: msg.imageBase64, mimeType: msg.imageMimeType || "image/jpeg" } : undefined;
+      const onboardedCheck = db.query("SELECT value FROM db_meta WHERE key = 'onboarded'").get() as { value: string } | null;
+      const onboardingChatCheck = db.query("SELECT value FROM db_meta WHERE key = 'onboarding_chat'").get() as { value: string } | null;
+      const isOnboarding = !onboardedCheck && onboardingChatCheck && parseInt(onboardingChatCheck.value) === chatId;
       const response = await processMessage(msg.text, {
         chatId,
         channel: channelName,
         db,
         config,
         registry,
+        isOnboarding: !!isOnboarding,
         onTextDelta: channelName === "web" ? (delta) => (webChannel as WebChannel).sendTextDelta(msg.externalChatId, delta) : undefined,
         onToolStart: channelName === "web" ? (name, input) => (webChannel as WebChannel).sendToolEvent(msg.externalChatId, "tool_start", { name }) : undefined,
         onToolResult: channelName === "web" ? (name, result) => (webChannel as WebChannel).sendToolEvent(msg.externalChatId, "tool_result", { name, result: result.slice(0, 200) }) : undefined,
-      });
+      }, image);
 
       if (typingInterval) clearInterval(typingInterval);
 

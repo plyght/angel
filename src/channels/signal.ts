@@ -1,4 +1,8 @@
 import type { ChannelAdapter, MessageHandler, IncomingMessage } from "./types";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+import OpenAI, { toFile } from "openai";
 
 export class SignalChannel implements ChannelAdapter {
   name = "signal";
@@ -55,24 +59,74 @@ export class SignalChannel implements ChannelAdapter {
     } catch {}
   }
 
-  private handleJsonRpc(msg: any) {
+  private async handleJsonRpc(msg: any) {
     if (!this.handler) return;
     if (msg.method !== "receive") return;
 
     const envelope = msg.params?.envelope;
-    if (!envelope?.dataMessage?.message) return;
+    if (!envelope?.dataMessage) return;
+    if (envelope.dataMessage.attachments?.length) {
+      console.log(`[angel] Signal attachments raw:`, JSON.stringify(envelope.dataMessage.attachments));
+    }
+
+    const dataMsg = envelope.dataMessage;
+    if (!dataMsg.message && !dataMsg.attachments?.length) return;
 
     const sender = envelope.sourceName || envelope.sourceNumber || "Unknown";
-    const text = envelope.dataMessage.message;
-    const groupId = envelope.dataMessage.groupInfo?.groupId;
+    const text = dataMsg.message || "";
+    const groupId = dataMsg.groupInfo?.groupId;
 
     const incoming: IncomingMessage = {
       externalChatId: groupId || envelope.sourceNumber || "",
       chatType: groupId ? "signal_group" : "signal_private",
       senderName: sender,
-      text,
+      text: text || (dataMsg.attachments?.length ? "[image]" : ""),
       isGroupMention: !!groupId,
     };
+
+    const attachments = dataMsg.attachments || [];
+    const imageAttachment = attachments.find((a: any) => a.contentType?.startsWith("image/"));
+    if (imageAttachment) {
+      const attDir = join(homedir(), ".local", "share", "signal-cli", "attachments");
+      const attId = imageAttachment.id || imageAttachment.filename;
+      if (attId) {
+        const attPath = join(attDir, attId);
+        console.log(`[angel] Signal attachment: ${attPath} exists=${existsSync(attPath)}`);
+        if (existsSync(attPath)) {
+          incoming.imageBase64 = readFileSync(attPath).toString("base64");
+          incoming.imageMimeType = imageAttachment.contentType;
+        }
+      }
+    }
+
+    const audioAttachment = attachments.find((a: any) => a.contentType?.startsWith("audio/"));
+    if (audioAttachment) {
+      const attDir = join(homedir(), ".local", "share", "signal-cli", "attachments");
+      const attId = audioAttachment.id || audioAttachment.filename;
+      if (attId) {
+        const attPath = join(attDir, attId);
+        if (existsSync(attPath)) {
+          try {
+            const client = new OpenAI();
+            const audioBuffer = readFileSync(attPath);
+            const file = await toFile(audioBuffer, audioAttachment.filename || "voice.m4a");
+            const transcription = await client.audio.transcriptions.create({
+              model: "whisper-1",
+              file,
+            });
+            incoming.audioTranscription = transcription.text;
+            if (!incoming.text || incoming.text === "[image]") {
+              incoming.text = `[voice message]: ${transcription.text}`;
+            } else {
+              incoming.text = `${incoming.text}\n\n[voice message]: ${transcription.text}`;
+            }
+            console.log(`[angel] Transcribed voice note: ${transcription.text}`);
+          } catch (err: any) {
+            console.error(`[angel] Voice transcription error: ${err.message}`);
+          }
+        }
+      }
+    }
 
     this.handler(incoming).catch((err) =>
       console.error(`[angel] Signal handler error: ${err.message}`)
