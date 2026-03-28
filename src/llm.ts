@@ -60,8 +60,8 @@ export async function chatComplete(
     model,
     messages: messages as any,
     tools: tools.length > 0 ? tools as any : undefined,
-    max_tokens: maxTokens,
-  });
+    max_completion_tokens: maxTokens,
+  } as any);
 
   const choice = response.choices[0];
   const duration = Date.now() - start;
@@ -94,7 +94,7 @@ async function streamChatComplete(
     model,
     messages: messages as any,
     tools: tools.length > 0 ? tools as any : undefined,
-    max_tokens: maxTokens,
+    max_completion_tokens: maxTokens,
     stream: true,
     stream_options: { include_usage: true },
   });

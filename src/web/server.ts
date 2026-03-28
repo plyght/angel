@@ -21,12 +21,19 @@ export function startWebServer(
   const port = webConfig?.port || 3000;
   const host = webConfig?.host || "127.0.0.1";
 
-  Bun.serve({
+  Bun.serve<{ chatId: string }>({
     port,
     hostname: host,
 
-    async fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url);
+
+      if (url.pathname === "/ws") {
+        const chatId = url.searchParams.get("chatId") || "default";
+        const ok = server.upgrade(req, { data: { chatId } });
+        if (ok) return undefined as any;
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
 
       if (url.pathname.startsWith("/api/")) {
         return handleApiRoute(req, url, db, config, registry, channels);

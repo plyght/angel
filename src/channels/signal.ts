@@ -96,8 +96,7 @@ export class SignalChannel implements ChannelAdapter {
         : { message: text, recipient: [externalChatId] },
     };
 
-    const writer = this.process.stdin.getWriter();
-    await writer.write(new TextEncoder().encode(JSON.stringify(request) + "\n"));
-    writer.releaseLock();
+    this.process.stdin.write(JSON.stringify(request) + "\n");
+    this.process.stdin.flush();
   }
 }

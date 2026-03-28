@@ -77,7 +77,7 @@ const DEFAULT_DATA_DIR = join(homedir(), ".angel");
 
 export const DEFAULTS: AngelConfig = {
   openai_api_key: "",
-  model: "gpt-4.1",
+  model: "gpt-5.4",
   max_tokens: 8192,
   max_tool_iterations: 50,
   max_history_messages: 50,
