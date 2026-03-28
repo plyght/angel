@@ -176,7 +176,7 @@ function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string,
   if (existsSync(soulPath)) {
     parts.push(readFileSync(soulPath, "utf-8"));
   } else {
-    parts.push("You are Angel, an autonomous AI assistant. You help users by using your available tools to accomplish tasks. Be concise, accurate, and proactive.");
+    parts.push("You are Angel, an autonomous AI assistant. You help users by using your available tools to accomplish tasks. Keep responses short and concise — a few sentences max unless the user asks for detail. No fluff, no filler, no unnecessary explanations. Be direct and conversational.");
   }
 
   const memoryContext = buildMemoryContext(db, chatId, config);
@@ -188,6 +188,9 @@ function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string,
   const now = new Date().toLocaleString("en-US", { timeZone: tz });
   parts.push(`\nCurrent time: ${now} (${tz})`);
   parts.push(`Channel: ${channel}`);
+  if (channel === "signal") {
+    parts.push("IMPORTANT: Do not use any markdown formatting (no *, **, #, `, ```, -, etc). Signal does not render markdown. Use plain text only.");
+  }
   parts.push(`Available tools: ${registry.listNames().join(", ")}`);
 
   return parts.join("\n\n");

@@ -26,6 +26,7 @@ export function handleCommand(text: string, chatId: number, db: Database, config
 /usage — Show token usage stats
 /settings — Show current settings
 /clear — Clear session history
+/reset — Redo onboarding
 /version — Show version`,
       };
 
@@ -80,6 +81,13 @@ Channels: ${enabledChannels.join(", ")}`,
     case "/clear":
       db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
       return { handled: true, text: "Session cleared." };
+
+    case "/reset":
+      db.run("DELETE FROM db_meta WHERE key IN ('onboarded', 'onboarding_chat')");
+      db.run("DELETE FROM memories WHERE category = 'profile'");
+      db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
+      db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
+      return { handled: true, text: "Onboarding reset! Send me a message to start fresh." };
 
     case "/version":
       return { handled: true, text: "Angel v0.1.0" };

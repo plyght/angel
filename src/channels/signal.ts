@@ -137,6 +137,21 @@ export class SignalChannel implements ChannelAdapter {
     this.process?.kill();
   }
 
+  async sendTyping(externalChatId: string) {
+    if (!this.process?.stdin) return;
+    const isGroup = externalChatId.length > 20;
+    const request = {
+      jsonrpc: "2.0",
+      method: "sendTyping",
+      id: crypto.randomUUID(),
+      params: isGroup
+        ? { groupId: externalChatId }
+        : { recipient: [externalChatId] },
+    };
+    this.process.stdin.write(JSON.stringify(request) + "\n");
+    this.process.stdin.flush();
+  }
+
   async sendText(externalChatId: string, text: string) {
     if (!this.process?.stdin) return;
 
