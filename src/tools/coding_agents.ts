@@ -11,7 +11,7 @@ const AGENTS: Record<string, AgentDef> = {
   claude: {
     command: "claude",
     buildArgs: (prompt, opts) => {
-      const args = ["-p", "--output-format", "json", "--max-turns", "50"];
+      const args = ["-p", "--output-format", "json", "--max-turns", "50", "--dangerously-skip-permissions"];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
       return args;
@@ -353,15 +353,17 @@ function extractSummary(agent: string, raw: string): string {
   if (agent === "claude") {
     try {
       const json = JSON.parse(raw);
-      const parts: string[] = [];
-      if (json.result) parts.push(json.result);
-      if (json.total_cost_usd) parts.push(`Cost: $${json.total_cost_usd.toFixed(4)}`);
-      if (json.num_turns) parts.push(`${json.num_turns} turns`);
-      if (json.duration_ms) parts.push(formatDuration(json.duration_ms));
-      if (json.is_error) parts.unshift("[error]");
-      return parts.join("\n") || raw.slice(0, 2000);
+      const meta: string[] = [];
+      if (json.is_error) meta.push("[error]");
+      if (json.total_cost_usd) meta.push(`Cost: $${json.total_cost_usd.toFixed(4)}`);
+      if (json.num_turns) meta.push(`${json.num_turns} turns`);
+      if (json.duration_ms) meta.push(formatDuration(json.duration_ms));
+      const metaLine = meta.length ? meta.join(" | ") + "\n\n" : "";
+      const content = json.result || "";
+      const full = metaLine + content;
+      return full.slice(0, 8000) || raw.slice(0, 8000);
     } catch {
-      return raw.slice(0, 2000);
+      return raw.slice(0, 8000);
     }
   }
 

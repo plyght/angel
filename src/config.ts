@@ -24,6 +24,7 @@ export interface SlackConfig extends ChannelConfig {
 export interface SignalConfig extends ChannelConfig {
   account?: string;
   signal_cli_path?: string;
+  allowed_numbers?: string[];
 }
 
 export interface MemoryConfig {

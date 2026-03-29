@@ -11,10 +11,14 @@ export class SignalChannel implements ChannelAdapter {
   private account: string;
   private cliPath: string;
   private process: any = null;
+  private allowedNumbers: Set<string> | null = null;
 
-  constructor(account: string, cliPath = "signal-cli") {
+  constructor(account: string, cliPath = "signal-cli", allowedNumbers?: string[]) {
     this.account = account;
     this.cliPath = cliPath;
+    if (allowedNumbers?.length) {
+      this.allowedNumbers = new Set(allowedNumbers);
+    }
   }
 
   async start(onMessage: MessageHandler) {
@@ -71,6 +75,11 @@ export class SignalChannel implements ChannelAdapter {
 
     const dataMsg = envelope.dataMessage;
     if (!dataMsg.message && !dataMsg.attachments?.length) return;
+
+    if (this.allowedNumbers && !this.allowedNumbers.has(envelope.sourceNumber || "")) {
+      console.log(`[angel] Signal: blocked message from unauthorized number ${envelope.sourceNumber}`);
+      return;
+    }
 
     const sender = envelope.sourceName || envelope.sourceNumber || "Unknown";
     const text = dataMsg.message || "";

@@ -203,7 +203,7 @@ async function boot() {
     channels.register(new SlackChannel(config.channels.slack.bot_token, config.channels.slack.app_token));
   }
   if (config.channels.signal?.enabled && config.channels.signal.account) {
-    channels.register(new SignalChannel(config.channels.signal.account, config.channels.signal.signal_cli_path));
+    channels.register(new SignalChannel(config.channels.signal.account, config.channels.signal.signal_cli_path, config.channels.signal.allowed_numbers));
   }
 
   const messageHandler = async (msg: any) => {
@@ -287,10 +287,31 @@ async function boot() {
   setCodingAgentNotifier(async (agent, message) => {
     const adapter = channels.get(agent.channel);
     if (adapter && agent.externalChatId) {
-      const maxLen = adapter.maxMessageLength || 4000;
-      const chunks = splitMessage(message, maxLen);
-      for (const chunk of chunks) {
-        await adapter.sendText(agent.externalChatId, chunk);
+      const chatId = upsertChat(db, agent.channel, agent.externalChatId, agent.channel, "system");
+      const syntheticInput = `[System: coding agent "${agent.agent}" just finished a task. Here is the raw output — summarize it for me in your own words and let me know what happened.]\n\nOriginal task: ${agent.prompt}\n\n${message}`;
+      try {
+        const response = await processMessage(syntheticInput, {
+          chatId,
+          channel: agent.channel,
+          db,
+          config,
+          registry,
+          isOnboarding: false,
+        });
+        if (response) {
+          const maxLen = adapter.maxMessageLength || 4000;
+          const chunks = splitMessage(response, maxLen);
+          for (const chunk of chunks) {
+            await adapter.sendText(agent.externalChatId, chunk);
+          }
+        }
+      } catch (err: any) {
+        console.error(`[angel] Error processing agent result: ${err.message}`);
+        const maxLen = adapter.maxMessageLength || 4000;
+        const chunks = splitMessage(message, maxLen);
+        for (const chunk of chunks) {
+          await adapter.sendText(agent.externalChatId, chunk);
+        }
       }
     }
   });
