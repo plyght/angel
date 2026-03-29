@@ -82,7 +82,7 @@ export class SignalChannel implements ChannelAdapter {
     }
 
     const sender = envelope.sourceName || envelope.sourceNumber || "Unknown";
-    const text = dataMsg.message || "";
+    let text = dataMsg.message || "";
     const groupId = dataMsg.groupInfo?.groupId;
 
     const mentions = dataMsg.mentions || [];
@@ -92,6 +92,33 @@ export class SignalChannel implements ChannelAdapter {
 
     if (groupId && !isMentioned) return;
 
+    if (dataMsg.quote) {
+      const quoteAuthor = dataMsg.quote.authorName || dataMsg.quote.authorNumber || "someone";
+      const quoteText = dataMsg.quote.text || "";
+      text = `[replying to ${quoteAuthor}: "${quoteText}"]\n${text}`;
+    }
+
+    if (dataMsg.sticker) {
+      const stickerEmoji = dataMsg.sticker.emoji || "";
+      text = text ? `${text}\n[sticker: ${stickerEmoji}]` : `[sticker: ${stickerEmoji}]`;
+    }
+
+    if (dataMsg.contact?.length) {
+      for (const c of dataMsg.contact) {
+        const name = [c.name?.givenName, c.name?.familyName].filter(Boolean).join(" ") || "Unknown";
+        const phone = c.number?.[0]?.value || "";
+        text = text ? `${text}\n[shared contact: ${name} ${phone}]` : `[shared contact: ${name} ${phone}]`;
+      }
+    }
+
+    if (dataMsg.previews?.length) {
+      for (const p of dataMsg.previews) {
+        if (p.url) {
+          text = text ? `${text}\n[link preview: ${p.title || p.url}]` : `[link preview: ${p.title || p.url}]`;
+        }
+      }
+    }
+
     const incoming: IncomingMessage = {
       externalChatId: groupId || envelope.sourceNumber || "",
       chatType: groupId ? "signal_group" : "signal_private",
@@ -99,6 +126,7 @@ export class SignalChannel implements ChannelAdapter {
       text: text || (dataMsg.attachments?.length ? "[image]" : ""),
       isGroupMention: !!groupId && isMentioned,
       senderDmId: envelope.sourceNumber || undefined,
+      replyToMessageId: dataMsg.quote ? String(dataMsg.quote.id) : undefined,
     };
 
     const attachments = dataMsg.attachments || [];
@@ -169,17 +197,46 @@ export class SignalChannel implements ChannelAdapter {
     this.process.stdin.flush();
   }
 
-  async sendText(externalChatId: string, text: string) {
+  async sendText(externalChatId: string, text: string, quoteTimestamp?: number, quoteAuthor?: string) {
     if (!this.process?.stdin) return;
 
     const isGroup = externalChatId.length > 20;
+    const params: any = isGroup
+      ? { message: text, groupId: externalChatId }
+      : { message: text, recipient: [externalChatId] };
+
+    if (quoteTimestamp) {
+      params.quoteTimestamp = quoteTimestamp;
+      if (quoteAuthor) params.quoteAuthor = quoteAuthor;
+    }
+
     const request = {
       jsonrpc: "2.0",
       method: "send",
       id: crypto.randomUUID(),
-      params: isGroup
-        ? { message: text, groupId: externalChatId }
-        : { message: text, recipient: [externalChatId] },
+      params,
+    };
+
+    this.process.stdin.write(JSON.stringify(request) + "\n");
+    this.process.stdin.flush();
+  }
+
+  async sendAttachment(externalChatId: string, filePath: string, caption?: string) {
+    if (!this.process?.stdin) return;
+
+    const isGroup = externalChatId.length > 20;
+    const params: any = isGroup
+      ? { groupId: externalChatId }
+      : { recipient: [externalChatId] };
+
+    params.attachment = [filePath];
+    if (caption) params.message = caption;
+
+    const request = {
+      jsonrpc: "2.0",
+      method: "send",
+      id: crypto.randomUUID(),
+      params,
     };
 
     this.process.stdin.write(JSON.stringify(request) + "\n");
