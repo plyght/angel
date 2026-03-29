@@ -58,18 +58,27 @@ export class iMessageChannel implements ChannelAdapter {
       `).all(this.lastRowId) as any[];
 
       for (const row of rows) {
-        this.lastRowId = row.ROWID;
+        const isGroup = row.chat_identifier.startsWith("chat");
+        if (isGroup && !/\bangel\b/i.test(row.text)) {
+          this.lastRowId = row.ROWID;
+          continue;
+        }
 
         const msg: IncomingMessage = {
           externalChatId: row.chat_identifier,
-          chatType: row.chat_identifier.startsWith("chat") ? "imessage_group" : "imessage_private",
+          chatType: isGroup ? "imessage_group" : "imessage_private",
           senderName: row.sender_id || "Unknown",
           text: row.text,
+          isGroupMention: isGroup,
         };
 
-        this.handler(msg).catch((err) =>
-          console.error(`[angel] iMessage handler error: ${err.message}`)
-        );
+        try {
+          await this.handler(msg);
+          this.lastRowId = row.ROWID;
+        } catch (err: any) {
+          console.error(`[angel] iMessage handler error: ${err.message}`);
+          this.lastRowId = row.ROWID;
+        }
       }
     } catch (err: any) {
       console.error(`[angel] iMessage poll error: ${err.message}`);

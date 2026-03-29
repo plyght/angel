@@ -1,5 +1,5 @@
 import type { Tool, ToolContext, ToolResult } from "./registry";
-import { createScheduledTask, updateTaskStatus } from "../db";
+import { createScheduledTask, updateTaskStatus, updateScheduledTask } from "../db";
 import { getNextCronRun } from "../scheduler";
 
 export const createTaskTool: Tool = {
@@ -99,4 +99,54 @@ export const cancelTaskTool: Tool = {
   },
 };
 
-export const scheduleTools = [createTaskTool, listTasksTool, cancelTaskTool];
+export const updateTaskTool: Tool = {
+  name: "update_scheduled_task",
+  description: "Update an existing scheduled task's name, prompt, schedule, or timezone.",
+  parameters: {
+    type: "object",
+    properties: {
+      task_id: { type: "number", description: "Task ID to update" },
+      name: { type: "string", description: "New task name" },
+      prompt: { type: "string", description: "New task prompt/instruction" },
+      cron: { type: "string", description: "New cron expression (set to empty string to convert to one-shot)" },
+      run_at: { type: "string", description: "New one-shot datetime (ISO format)" },
+      timezone: { type: "string", description: "New IANA timezone" },
+    },
+    required: ["task_id"],
+  },
+  risk: "medium",
+
+  async execute(input: { task_id: number; name?: string; prompt?: string; cron?: string; run_at?: string; timezone?: string }, ctx: ToolContext): Promise<ToolResult> {
+    const existing = ctx.db.query("SELECT * FROM scheduled_tasks WHERE id = ? AND chat_id = ?").get(input.task_id, ctx.chatId) as any;
+    if (!existing) return { output: `Task #${input.task_id} not found in this chat`, isError: true };
+
+    const tz = input.timezone || existing.timezone || "UTC";
+    const fields: any = {};
+    if (input.name) fields.name = input.name;
+    if (input.prompt) fields.prompt = input.prompt;
+    if (input.timezone) fields.timezone = input.timezone;
+
+    if (input.cron !== undefined) {
+      if (input.cron === "") {
+        fields.cron_expr = null;
+      } else {
+        try {
+          fields.cron_expr = input.cron;
+          fields.next_run_at = getNextCronRun(input.cron, tz);
+        } catch (err: any) {
+          return { output: `Invalid cron expression: ${err.message}`, isError: true };
+        }
+      }
+    }
+
+    if (input.run_at) {
+      fields.next_run_at = new Date(input.run_at).toISOString();
+      fields.cron_expr = null;
+    }
+
+    updateScheduledTask(ctx.db, input.task_id, fields);
+    return { output: `Task #${input.task_id} updated.` };
+  },
+};
+
+export const scheduleTools = [createTaskTool, listTasksTool, cancelTaskTool, updateTaskTool];

@@ -7,7 +7,7 @@ import { processMessage } from "./agent";
 import { splitMessage } from "./channels/types";
 import { CronExpressionParser } from "cron-parser";
 
-const TICK_INTERVAL = 60_000;
+const TICK_INTERVAL = 15_000;
 
 export function startScheduler(
   db: Database,
@@ -15,7 +15,7 @@ export function startScheduler(
   registry: ToolRegistry,
   channels: ChannelRegistry
 ) {
-  console.log("[angel] Scheduler started (60s tick)");
+  console.log("[angel] Scheduler started (15s tick)");
 
   setInterval(async () => {
     try {
@@ -44,14 +44,18 @@ async function tick(
       }
 
       const start = Date.now();
-      const result = await processMessage(task.prompt, {
+      const sentTracker = { value: false };
+      const rawResult = await processMessage(task.prompt, {
         chatId: task.chat_id,
         channel: chatRow.channel,
         db,
         config,
         registry,
+        usedSendMessage: sentTracker,
       });
       const durationMs = Date.now() - start;
+      if (typeof rawResult !== "string") continue;
+      const result = rawResult;
 
       db.run(
         `INSERT INTO task_run_logs (task_id, chat_id, started_at, finished_at, duration_ms, success, result_summary)
@@ -59,12 +63,14 @@ async function tick(
         [task.id, task.chat_id, Math.floor(durationMs / 1000), durationMs, result.slice(0, 500)]
       );
 
-      const adapter = channels.get(chatRow.channel);
-      if (adapter && result) {
-        const chunks = splitMessage(result, adapter.maxMessageLength || 4000);
-        for (const chunk of chunks) {
-          await adapter.sendText(chatRow.external_chat_id, chunk);
-          if (chunks.length > 1) await sleep(500);
+      if (!sentTracker.value) {
+        const adapter = channels.get(chatRow.channel);
+        if (adapter && result) {
+          const chunks = splitMessage(result, adapter.maxMessageLength || 4000);
+          for (const chunk of chunks) {
+            await adapter.sendText(chatRow.external_chat_id, chunk);
+            if (chunks.length > 1) await sleep(500);
+          }
         }
       }
 
@@ -94,7 +100,7 @@ async function tick(
 export function getNextCronRun(cronExpr: string, timezone = "UTC"): string {
   const expr = CronExpressionParser.parse(cronExpr, { tz: timezone });
   const next = expr.next();
-  return next.toISOString();
+  return next!.toISOString() as string;
 }
 
 function sleep(ms: number): Promise<void> {

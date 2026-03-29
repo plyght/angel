@@ -27,6 +27,7 @@ function migrate(db: Database) {
 
   const migrations = [
     migrationV1,
+    migrationV2,
   ];
 
   for (let i = current; i < migrations.length; i++) {
@@ -175,6 +176,60 @@ function migrationV1(db: Database) {
       enabled INTEGER DEFAULT 1,
       loaded_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS pending_confirmations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      origin_chat_id INTEGER NOT NULL,
+      dm_chat_id INTEGER,
+      channel TEXT NOT NULL,
+      dm_id TEXT NOT NULL,
+      action_description TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_confirmations(status, dm_id);
+
+    CREATE TABLE IF NOT EXISTS allowed_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      added_by TEXT DEFAULT 'config',
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(channel, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_allowed_channel ON allowed_users(channel);
+  `);
+}
+
+function migrationV2(db: Database) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS allowed_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      added_by TEXT DEFAULT 'config',
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(channel, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_allowed_channel ON allowed_users(channel);
+
+    CREATE TABLE IF NOT EXISTS pending_confirmations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      origin_chat_id INTEGER NOT NULL,
+      dm_chat_id INTEGER,
+      channel TEXT NOT NULL,
+      dm_id TEXT NOT NULL,
+      action_description TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_confirmations(status, dm_id);
   `);
 }
 
@@ -263,20 +318,37 @@ export function getScheduledTasksDue(db: Database): any[] {
   ).all();
 }
 
+function toSqliteDatetime(iso: string): string {
+  return iso.replace("T", " ").replace(/\.\d+Z$/, "").replace(/Z$/, "");
+}
+
 export function createScheduledTask(db: Database, chatId: number, name: string, prompt: string, cronExpr: string | null, nextRunAt: string, timezone = "UTC"): number {
   db.run(
     `INSERT INTO scheduled_tasks (chat_id, name, prompt, cron_expr, next_run_at, timezone) VALUES (?, ?, ?, ?, ?, ?)`,
-    [chatId, name, prompt, cronExpr, nextRunAt, timezone]
+    [chatId, name, prompt, cronExpr, toSqliteDatetime(nextRunAt), timezone]
   );
   return (db.query("SELECT last_insert_rowid() as id").get() as { id: number }).id;
 }
 
 export function updateTaskNextRun(db: Database, taskId: number, nextRunAt: string) {
-  db.run("UPDATE scheduled_tasks SET next_run_at = ? WHERE id = ?", [nextRunAt, taskId]);
+  db.run("UPDATE scheduled_tasks SET next_run_at = ? WHERE id = ?", [toSqliteDatetime(nextRunAt), taskId]);
 }
 
 export function updateTaskStatus(db: Database, taskId: number, status: string) {
   db.run("UPDATE scheduled_tasks SET status = ? WHERE id = ?", [status, taskId]);
+}
+
+export function updateScheduledTask(db: Database, taskId: number, fields: { name?: string; prompt?: string; cron_expr?: string | null; next_run_at?: string; timezone?: string }) {
+  const sets: string[] = [];
+  const params: any[] = [];
+  if (fields.name !== undefined) { sets.push("name = ?"); params.push(fields.name); }
+  if (fields.prompt !== undefined) { sets.push("prompt = ?"); params.push(fields.prompt); }
+  if (fields.cron_expr !== undefined) { sets.push("cron_expr = ?"); params.push(fields.cron_expr); }
+  if (fields.next_run_at !== undefined) { sets.push("next_run_at = ?"); params.push(toSqliteDatetime(fields.next_run_at)); }
+  if (fields.timezone !== undefined) { sets.push("timezone = ?"); params.push(fields.timezone); }
+  if (sets.length === 0) return;
+  params.push(taskId);
+  db.run(`UPDATE scheduled_tasks SET ${sets.join(", ")} WHERE id = ?`, params);
 }
 
 export function insertTaskDlq(db: Database, taskId: number, chatId: number, errorText: string, prompt: string, retryCount: number) {

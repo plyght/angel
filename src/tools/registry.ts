@@ -8,6 +8,7 @@ export interface ToolContext {
   workingDir: string;
   db: Database;
   config: AngelConfig;
+  registry?: ToolRegistry;
   sendIntermediate?: (text: string) => Promise<void>;
 }
 

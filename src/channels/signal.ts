@@ -85,12 +85,20 @@ export class SignalChannel implements ChannelAdapter {
     const text = dataMsg.message || "";
     const groupId = dataMsg.groupInfo?.groupId;
 
+    const mentions = dataMsg.mentions || [];
+    const selfNumber = this.account;
+    const isMentioned = mentions.some((m: any) => m.number === selfNumber) ||
+      /\bangel\b/i.test(text);
+
+    if (groupId && !isMentioned) return;
+
     const incoming: IncomingMessage = {
       externalChatId: groupId || envelope.sourceNumber || "",
       chatType: groupId ? "signal_group" : "signal_private",
       senderName: sender,
       text: text || (dataMsg.attachments?.length ? "[image]" : ""),
-      isGroupMention: !!groupId,
+      isGroupMention: !!groupId && isMentioned,
+      senderDmId: envelope.sourceNumber || undefined,
     };
 
     const attachments = dataMsg.attachments || [];

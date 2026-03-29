@@ -5,6 +5,7 @@ import { join } from "path";
 
 export interface ChannelConfig {
   enabled?: boolean;
+  allowed_users?: string[];
 }
 
 export interface iMessageConfig extends ChannelConfig {
@@ -65,6 +66,7 @@ export interface AngelConfig {
   skills_dir?: string;
   mcp_servers?: Record<string, McpServerConfig>;
   sandbox?: { mode: "none" | "subprocess" };
+  safe_word?: string;
 }
 
 const DEFAULT_DATA_DIR = join(homedir(), ".angel");
@@ -105,7 +107,7 @@ export function loadConfig(): AngelConfig {
   }
   const raw = readFileSync(path, "utf-8");
   const parsed = parseYaml(raw) || {};
-  return deepMerge(DEFAULTS, parsed) as AngelConfig;
+  return resolveEnvVars(deepMerge(DEFAULTS, parsed)) as AngelConfig;
 }
 
 export function saveConfig(config: Partial<AngelConfig>): void {

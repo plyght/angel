@@ -19,15 +19,22 @@ export interface AgentOptions {
   onToolResult?: (name: string, result: string) => void;
   sendIntermediate?: (text: string) => Promise<void>;
   isOnboarding?: boolean;
+  signal?: AbortSignal;
+  usedSendMessage?: { value: boolean };
+  senderName?: string;
+  senderDmId?: string;
 }
 
-export async function processMessage(userMessage: string, opts: AgentOptions, image?: { base64: string; mimeType: string }): Promise<string> {
+export const INTERRUPTED = Symbol("interrupted");
+
+export async function processMessage(userMessage: string, opts: AgentOptions, image?: { base64: string; mimeType: string }): Promise<string | typeof INTERRUPTED> {
   const { chatId, channel, db, config, registry } = opts;
+  const senderDmId = opts.senderDmId;
 
   const sessionJson = loadSession(db, chatId);
   let messages: LlmMessage[] = sessionJson ? JSON.parse(sessionJson) : [];
 
-  let systemPrompt = buildSystemPrompt(config, chatId, channel, db, registry);
+  let systemPrompt = buildSystemPrompt(config, chatId, channel, db, registry, senderDmId);
 
   if (opts.isOnboarding) {
     systemPrompt += `\n\n<onboarding>
@@ -64,6 +71,11 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
   let finalText = "";
 
   while (iterations < config.max_tool_iterations) {
+    if (opts.signal?.aborted) {
+      saveSession(db, chatId, JSON.stringify(messages));
+      return INTERRUPTED;
+    }
+
     const hookResult = await runHook("before_llm", { messages, tools }, config);
     if (hookResult?.action === "block") {
       finalText = hookResult.reason || "Request blocked by hook.";
@@ -115,10 +127,16 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
       workingDir,
       db,
       config,
+      registry,
       sendIntermediate: opts.sendIntermediate,
     };
 
     for (const tc of response.toolCalls) {
+      if (opts.signal?.aborted) {
+        saveSession(db, chatId, JSON.stringify(messages));
+        return INTERRUPTED;
+      }
+
       opts.onToolStart?.(tc.name, tc.arguments);
 
       const beforeTool = await runHook("before_tool", { name: tc.name, input: tc.arguments }, config);
@@ -136,10 +154,19 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
       try {
         parsed = JSON.parse(tc.arguments);
       } catch {
-        parsed = {};
+        messages.push({
+          role: "tool",
+          tool_call_id: tc.id,
+          content: `Error: malformed tool arguments for ${tc.name}: ${tc.arguments.slice(0, 200)}`,
+        });
+        opts.onToolResult?.(tc.name, "Error: malformed arguments");
+        continue;
       }
 
       const result = await registry.execute(tc.name, parsed, ctx);
+      if (tc.name === "send_message" && !result.isError && opts.usedSendMessage) {
+        opts.usedSendMessage.value = true;
+      }
 
       await runHook("after_tool", { name: tc.name, result: result.output }, config);
 
@@ -161,7 +188,7 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
 
   saveSession(db, chatId, JSON.stringify(messages));
 
-  storeMessage(db, chatId, "user", userMessage, { senderName: "user" });
+  storeMessage(db, chatId, "user", userMessage, { senderName: opts.senderName || "user" });
   if (finalText) {
     storeMessage(db, chatId, "assistant", finalText, { isFromBot: true });
   }
@@ -169,7 +196,7 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
   return finalText;
 }
 
-function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string, db: Database, registry: ToolRegistry): string {
+function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string, db: Database, registry: ToolRegistry, senderDmId?: string): string {
   const parts: string[] = [];
 
   const soulPath = config.soul_md_path || join(config.data_dir, "SOUL.md");
@@ -188,10 +215,32 @@ function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string,
   const now = new Date().toLocaleString("en-US", { timeZone: tz });
   parts.push(`\nCurrent time: ${now} (${tz})`);
   parts.push(`Channel: ${channel}`);
+  const chatRow = db.query("SELECT chat_type FROM chats WHERE id = ?").get(chatId) as any;
+  if (chatRow?.chat_type?.includes("group") || chatRow?.chat_type?.includes("guild")) {
+    parts.push("This is a GROUP chat. Messages are prefixed with [sender name]. Address people by name when relevant. You only receive messages where you were mentioned or addressed.");
+  }
   if (channel === "signal") {
     parts.push("IMPORTANT: Do not use any markdown formatting (no *, **, #, `, ```, -, etc). Signal does not render markdown. Use plain text only.");
   }
   parts.push(`Available tools: ${registry.listNames().join(", ")}`);
+
+  if (config.safe_word) {
+    const isGroup = chatRow?.chat_type?.includes("group") || chatRow?.chat_type?.includes("guild");
+    let safetyInstructions = `A safe word is configured. When you are about to perform a dangerous or irreversible action (deleting files, running risky commands, modifying production systems, etc.), you must verify the safe word BEFORE executing. Never reveal or hint at what the safe word is. Do not ask for the safe word on routine/low-risk operations.`;
+    if (isGroup) {
+      safetyInstructions += `\n\nIMPORTANT: This is a group chat. NEVER ask for the safe word here. Instead:
+1. Use request_confirmation to store the pending action (tool name + input)
+2. Use send_message to DM the user privately, telling them what action needs confirmation, the confirmation ID, and to reply with the safe word
+3. In the group, say something like "I'll DM you to confirm that."
+4. When the user replies in their DM with the safe word, use verify_safe_word, then check_pending_confirmations to find pending actions, and approve_confirmation to execute it.`;
+      if (senderDmId) {
+        safetyInstructions += `\nThe current sender's DM ID is: ${senderDmId} (use this as dm_id for request_confirmation and as chat_id with send_message on channel "${channel}").`;
+      }
+    } else {
+      safetyInstructions += `\nAsk the user to confirm by providing the safe word in this chat. If they provide the correct safe word, proceed. Also: if a user sends what looks like a safe word, check_pending_confirmations for their DM ID — they may be confirming an action from a group chat. If there are pending confirmations, verify_safe_word and approve_confirmation.`;
+    }
+    parts.push(`\n<safety>\n${safetyInstructions}\n</safety>`);
+  }
 
   return parts.join("\n\n");
 }

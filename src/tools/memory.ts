@@ -134,4 +134,33 @@ export const searchMemoryTool: Tool = {
   },
 };
 
-export const memoryTools = [readMemoryTool, writeMemoryTool, deleteMemoryTool, searchMemoryTool];
+export const updateMemoryTool: Tool = {
+  name: "update_memory",
+  description: "Update an existing memory's content, category, or confidence.",
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "number", description: "Memory ID to update" },
+      content: { type: "string", description: "New content" },
+      category: { type: "string", enum: ["profile", "knowledge", "event", "general"], description: "New category" },
+      confidence: { type: "number", description: "New confidence (0-1)" },
+    },
+    required: ["id"],
+  },
+  risk: "low",
+
+  async execute(input: { id: number; content?: string; category?: string; confidence?: number }, ctx: ToolContext): Promise<ToolResult> {
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (input.content) { sets.push("content = ?"); params.push(input.content); }
+    if (input.category) { sets.push("category = ?"); params.push(input.category); }
+    if (input.confidence !== undefined) { sets.push("confidence = ?"); params.push(input.confidence); }
+    if (sets.length === 0) return { output: "Nothing to update", isError: true };
+    sets.push("updated_at = datetime('now')");
+    params.push(input.id);
+    ctx.db.run(`UPDATE memories SET ${sets.join(", ")} WHERE id = ?`, params);
+    return { output: `Memory #${input.id} updated.` };
+  },
+};
+
+export const memoryTools = [readMemoryTool, writeMemoryTool, deleteMemoryTool, searchMemoryTool, updateMemoryTool];

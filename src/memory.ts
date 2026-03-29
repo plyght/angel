@@ -97,7 +97,9 @@ Output only valid JSON array, nothing else.`,
        VALUES (?, datetime('now'), datetime('now'), ?, ?, ?)`,
       [chatId, facts.length, inserted, skipped]
     );
-  } catch {}
+  } catch (err: any) {
+    console.error(`[angel] Memory reflector error: ${err.message}`);
+  }
 }
 
 export function writeAgentsMd(config: AngelConfig, content: string, chatId?: number, channel?: string): void {

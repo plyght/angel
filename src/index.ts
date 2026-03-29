@@ -1,9 +1,22 @@
 #!/usr/bin/env bun
 import * as p from "@clack/prompts";
 import color from "picocolors";
-import { loadConfig, configExists, configPath } from "./config";
+import { loadConfig, configExists, configPath, type ChannelConfig } from "./config";
+import type { Database as BunDatabase } from "bun:sqlite";
+
+function getAllowedUsers(db: BunDatabase, channel: string, configList?: string[]): Set<string> | null {
+  const dbRows = db.query(
+    "SELECT user_id FROM allowed_users WHERE channel = ?"
+  ).all(channel) as { user_id: string }[];
+
+  const combined = new Set<string>();
+  if (configList) for (const u of configList) combined.add(u);
+  for (const row of dbRows) combined.add(row.user_id);
+
+  return combined.size > 0 ? combined : null;
+}
 import { getDb, upsertChat } from "./db";
-import { processMessage } from "./agent";
+import { processMessage, INTERRUPTED } from "./agent";
 import { ToolRegistry } from "./tools/registry";
 import { ChannelRegistry, splitMessage } from "./channels/types";
 import { bashTool } from "./tools/bash";
@@ -15,7 +28,8 @@ import { scheduleTools } from "./tools/schedule";
 import { subagentTools } from "./tools/subagent";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { browserTool } from "./tools/browser";
-import { codingAgentTools, setCodingAgentNotifier } from "./tools/coding_agents";
+import { codingAgentTools, setCodingAgentNotifier, killAllCodingAgents } from "./tools/coding_agents";
+import { confirmationTools } from "./tools/confirmation";
 import { handleCommand } from "./commands";
 import { handleExplicitMemory, scheduleReflector } from "./memory";
 import { startScheduler } from "./scheduler";
@@ -181,6 +195,7 @@ async function boot() {
   registry.register(sendMessageTool);
   registry.register(browserTool);
   registry.registerMany(codingAgentTools);
+  registry.registerMany(confirmationTools);
 
   const mcpTools = await initMcpServers(config);
   registry.registerMany(mcpTools);
@@ -206,8 +221,26 @@ async function boot() {
     channels.register(new SignalChannel(config.channels.signal.account, config.channels.signal.signal_cli_path, config.channels.signal.allowed_numbers));
   }
 
+  const activeChats: Map<number, AbortController> = new Map();
+
   const messageHandler = async (msg: any) => {
-    const chatId = upsertChat(db, msg.externalChatId.includes("@") ? "imessage" : msg.chatType.split("_")[0], msg.externalChatId, msg.chatType, msg.senderName);
+    const channelKey = msg.chatType.split("_")[0];
+    const channelConfig = (config.channels as any)[channelKey] as ChannelConfig | undefined;
+    const allowedUsers = getAllowedUsers(db, channelKey, channelConfig?.allowed_users);
+    if (allowedUsers && !allowedUsers.has(msg.senderName)) {
+      return;
+    }
+
+    const chatId = upsertChat(db, channelKey, msg.externalChatId, msg.chatType, msg.senderName);
+
+    const existing = activeChats.get(chatId);
+    if (existing) {
+      existing.abort();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    const controller = new AbortController();
+    activeChats.set(chatId, controller);
 
     const memoryResult = handleExplicitMemory(msg.text, db, chatId);
     if (memoryResult) {
@@ -252,16 +285,25 @@ async function boot() {
       const onboardedCheck = db.query("SELECT value FROM db_meta WHERE key = 'onboarded'").get() as { value: string } | null;
       const onboardingChatCheck = db.query("SELECT value FROM db_meta WHERE key = 'onboarding_chat'").get() as { value: string } | null;
       const isOnboarding = !onboardedCheck && onboardingChatCheck && parseInt(onboardingChatCheck.value) === chatId;
-      const response = await processMessage(msg.text, {
+      const userText = msg.isGroupMention ? `[${msg.senderName}]: ${msg.text}` : msg.text;
+      const response = await processMessage(userText, {
         chatId,
         channel: channelName,
         db,
         config,
         registry,
         isOnboarding: !!isOnboarding,
+        signal: controller.signal,
+        senderName: msg.senderName,
+        senderDmId: msg.isGroupMention ? (msg.senderDmId || msg.senderName) : undefined,
       }, image);
 
       if (typingInterval) clearInterval(typingInterval);
+
+      if (response === INTERRUPTED) {
+        console.log(`[angel] Chat ${chatId} interrupted by new message`);
+        return;
+      }
 
       if (adapter && response) {
         const maxLen = adapter.maxMessageLength || 4000;
@@ -275,10 +317,13 @@ async function boot() {
       scheduleReflector(db, chatId, config, recentMsgs);
     } catch (err: any) {
       if (typingInterval) clearInterval(typingInterval);
+      if (controller.signal.aborted) return;
       console.error(`[angel] Error processing message: ${err.message}`);
       if (adapter) {
         await adapter.sendText(msg.externalChatId, "Sorry, I encountered an error processing your message.");
       }
+    } finally {
+      if (activeChats.get(chatId) === controller) activeChats.delete(chatId);
     }
   };
 
@@ -298,7 +343,7 @@ async function boot() {
           registry,
           isOnboarding: false,
         });
-        if (response) {
+        if (typeof response === "string" && response) {
           const maxLen = adapter.maxMessageLength || 4000;
           const chunks = splitMessage(response, maxLen);
           for (const chunk of chunks) {
@@ -323,6 +368,7 @@ async function boot() {
 
   process.on("SIGINT", async () => {
     console.log("\n[angel] Shutting down...");
+    killAllCodingAgents();
     await channels.stopAll();
     await shutdownMcpServers();
     process.exit(0);

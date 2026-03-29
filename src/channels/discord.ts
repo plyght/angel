@@ -46,6 +46,7 @@ export class DiscordChannel implements ChannelAdapter {
         senderName: msg.author.displayName || msg.author.username,
         text,
         isGroupMention: !isDM && isMentioned,
+        senderDmId: msg.author.id,
       };
 
       this.handler(incoming).catch((err) =>

@@ -4,7 +4,7 @@ import { processMessage } from "../agent";
 const MAX_DEPTH = 2;
 const MAX_CONCURRENT = 4;
 
-const runningAgents: Map<number, { id: number; name: string; status: string; result?: string }> = new Map();
+const runningAgents: Map<number, { id: number; name: string; status: string; result?: string; [k: string]: any }> = new Map();
 let nextId = 1;
 
 export const spawnSubagentTool: Tool = {
@@ -28,7 +28,7 @@ export const spawnSubagentTool: Tool = {
     }
 
     const id = nextId++;
-    const entry = { id, name: input.name, status: "running" };
+    const entry: { id: number; name: string; status: string; result?: string } = { id, name: input.name, status: "running" };
     runningAgents.set(id, entry);
 
     ctx.db.run(
@@ -38,13 +38,14 @@ export const spawnSubagentTool: Tool = {
 
     (async () => {
       try {
-        const result = await processMessage(input.prompt, {
+        const rawResult = await processMessage(input.prompt, {
           chatId: ctx.chatId,
           channel: ctx.channel,
           db: ctx.db,
           config: { ...ctx.config, max_tool_iterations: input.max_iterations || 20 },
-          registry: ctx.config as any,
+          registry: ctx.registry!,
         });
+        const result = typeof rawResult === "string" ? rawResult : "Interrupted";
         entry.status = "completed";
         entry.result = result;
         ctx.db.run(

@@ -63,7 +63,11 @@ async function which(cmd: string): Promise<string | null> {
   try {
     const proc = Bun.spawn(["which", cmd], { stdout: "pipe", stderr: "pipe" });
     const out = (await new Response(proc.stdout).text()).trim();
-    return out || null;
+    if (!out) return null;
+    const check = Bun.spawn([out, "--version"], { stdout: "pipe", stderr: "pipe" });
+    await check.exited;
+    if (check.exitCode !== 0) return null;
+    return out;
   } catch {
     return null;
   }
@@ -135,15 +139,16 @@ export const spawnCodingAgentTool: Tool = {
       return { output: `Unknown agent: ${input.agent}. Available: ${Object.keys(AGENTS).join(", ")}`, isError: true };
     }
 
-    const path = await def.detect();
-    if (!path) {
+    const resolvedPath = await def.detect();
+    if (!resolvedPath) {
       return {
         output: `${input.agent} is not installed.\n${def.installHint}`,
         isError: true,
       };
     }
 
-    const cwd = input.working_dir || ctx.workingDir;
+    let cwd = input.working_dir || ctx.workingDir;
+    if (cwd.startsWith("~")) cwd = cwd.replace("~", process.env.HOME || "");
     const args = def.buildArgs(input.prompt, { workingDir: cwd, model: input.model });
 
     const chatRow = ctx.db?.query("SELECT external_chat_id FROM chats WHERE id = ?").get(ctx.chatId) as any;
@@ -167,7 +172,7 @@ export const spawnCodingAgentTool: Tool = {
     runningAgents.set(id, entry);
 
     try {
-      const proc = Bun.spawn([def.command, ...args], {
+      const proc = Bun.spawn([resolvedPath, ...args], {
         cwd,
         stdout: "pipe",
         stderr: "pipe",
@@ -384,4 +389,14 @@ function formatDuration(ms: number): string {
   return `${hours}h ${remMins}m`;
 }
 
-export const codingAgentTools = [spawnCodingAgentTool, codingAgentStatusTool, killCodingAgentTool];
+export function killAllCodingAgents() {
+  for (const entry of runningAgents.values()) {
+    if (entry.status === "running") {
+      try { entry.process?.kill(); } catch {}
+      entry.status = "failed";
+      entry.finishedAt = new Date();
+    }
+  }
+}
+
+export const codingAgentTools = [spawnCodingAgentTool, codingAgentStatusTool, killCodingAgentTool, listCodingAgentsTool];
