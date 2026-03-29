@@ -1,4 +1,7 @@
-import { loadConfig, configExists } from "./config";
+#!/usr/bin/env bun
+import * as p from "@clack/prompts";
+import color from "picocolors";
+import { loadConfig, configExists, configPath } from "./config";
 import { getDb, upsertChat } from "./db";
 import { processMessage } from "./agent";
 import { ToolRegistry } from "./tools/registry";
@@ -12,6 +15,7 @@ import { scheduleTools } from "./tools/schedule";
 import { subagentTools } from "./tools/subagent";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { browserTool } from "./tools/browser";
+import { codingAgentTools, setCodingAgentNotifier } from "./tools/coding_agents";
 import { handleCommand } from "./commands";
 import { handleExplicitMemory, scheduleReflector } from "./memory";
 import { startScheduler } from "./scheduler";
@@ -25,7 +29,34 @@ import { DiscordChannel } from "./channels/discord";
 import { SlackChannel } from "./channels/slack";
 import { SignalChannel } from "./channels/signal";
 
-const command = process.argv[2] || "start";
+const VERSION = "0.1.0";
+const args = process.argv.slice(2);
+const command = args[0] || "start";
+
+function printHelp() {
+  console.log(`
+  ${color.bgCyan(color.black(" angel "))} ${color.dim(`v${VERSION}`)}
+
+  ${color.bold("Usage:")} angel <command>
+
+  ${color.bold("Commands:")}
+    ${color.cyan("start")}       Start the agent ${color.dim("(default)")}
+    ${color.cyan("setup")}       Interactive setup wizard
+    ${color.cyan("doctor")}      Run diagnostics and health checks
+    ${color.cyan("config")}      Show current configuration
+    ${color.cyan("config path")} Show config file path
+    ${color.cyan("config edit")} Open config in $EDITOR
+    ${color.cyan("agents")}      Show installed coding agents
+    ${color.cyan("reset")}       Reset onboarding and profile data
+    ${color.cyan("version")}     Show version
+    ${color.cyan("help")}        Show this help
+
+  ${color.bold("Examples:")}
+    ${color.dim("$")} angel              ${color.dim("# starts the agent")}
+    ${color.dim("$")} angel setup        ${color.dim("# run setup wizard")}
+    ${color.dim("$")} angel doctor       ${color.dim("# check everything works")}
+`);
+}
 
 switch (command) {
   case "setup":
@@ -37,25 +68,102 @@ switch (command) {
     break;
 
   case "version":
-    console.log("Angel v0.1.0");
+  case "v":
+    console.log(`angel v${VERSION}`);
     break;
 
+  case "help":
+  case "h":
+    printHelp();
+    break;
+
+  case "config": {
+    const sub = args[1];
+    if (sub === "path") {
+      console.log(configPath());
+    } else if (sub === "edit") {
+      const editor = process.env.EDITOR || "nano";
+      const proc = Bun.spawn([editor, configPath()], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+      await proc.exited;
+    } else {
+      if (!configExists()) {
+        p.log.warn(`No config found. Run ${color.cyan("angel setup")} first.`);
+        break;
+      }
+      const config = loadConfig();
+      const enabledChannels = Object.entries(config.channels)
+        .filter(([_, v]: [string, any]) => v?.enabled !== false)
+        .map(([k]) => k);
+      p.intro(color.bgCyan(color.black(" angel config ")));
+      p.log.info(`Model:      ${color.cyan(config.model)}`);
+      p.log.info(`Max tokens: ${color.cyan(String(config.max_tokens))}`);
+      p.log.info(`Timezone:   ${color.cyan(config.timezone)}`);
+      p.log.info(`Channels:   ${enabledChannels.length ? color.cyan(enabledChannels.join(", ")) : color.dim("none")}`);
+      p.log.info(`Data dir:   ${color.dim(config.data_dir)}`);
+      p.log.info(`Config:     ${color.dim(configPath())}`);
+      p.outro("");
+    }
+    break;
+  }
+
+  case "reset": {
+    if (!configExists()) {
+      p.log.warn("Nothing to reset — no config found.");
+      break;
+    }
+    const confirm = await p.confirm({
+      message: "This will clear your onboarding data and profile memories. Continue?",
+    });
+    if (p.isCancel(confirm) || !confirm) {
+      p.cancel("Reset cancelled.");
+      break;
+    }
+    const config = loadConfig();
+    const db = getDb(config.data_dir);
+    db.run("DELETE FROM db_meta WHERE key IN ('onboarded', 'onboarding_chat')");
+    db.run("DELETE FROM memories WHERE category = 'profile'");
+    p.log.success("Onboarding and profile data cleared. Next message will restart onboarding.");
+    break;
+  }
+
+  case "agents": {
+    const { listCodingAgentsTool } = await import("./tools/coding_agents");
+    p.intro(color.bgCyan(color.black(" angel agents ")));
+    const result = await listCodingAgentsTool.execute({}, {} as any);
+    for (const line of result.output.split("\n")) {
+      const installed = line.includes("installed (");
+      if (installed) {
+        p.log.success(line);
+      } else {
+        p.log.warn(line);
+      }
+    }
+    p.outro("Angel can use any installed agent via the spawn_coding_agent tool.");
+    break;
+  }
+
   case "start":
-  default:
     await boot();
     break;
+
+  default:
+    console.log(`\n  Unknown command: ${color.red(command)}\n`);
+    printHelp();
+    process.exit(1);
 }
 
 async function boot() {
   if (!configExists()) {
-    console.log("[angel] No config found. Running setup...\n");
+    p.log.warn("No config found. Running setup...");
     await runSetup();
     return;
   }
 
+  p.intro(color.bgCyan(color.black(" angel ")));
+
   const config = loadConfig();
   if (!config.openai_api_key) {
-    console.error("[angel] Error: openai_api_key not set in config. Run 'angel setup'.");
+    p.log.error(`openai_api_key not set. Run ${color.cyan("bun run setup")}.`);
     process.exit(1);
   }
 
@@ -72,6 +180,7 @@ async function boot() {
   registry.registerMany(subagentTools);
   registry.register(sendMessageTool);
   registry.register(browserTool);
+  registry.registerMany(codingAgentTools);
 
   const mcpTools = await initMcpServers(config);
   registry.registerMany(mcpTools);
@@ -175,9 +284,21 @@ async function boot() {
 
   await channels.startAll(messageHandler);
 
+  setCodingAgentNotifier(async (agent, message) => {
+    const adapter = channels.get(agent.channel);
+    if (adapter && agent.externalChatId) {
+      const maxLen = adapter.maxMessageLength || 4000;
+      const chunks = splitMessage(message, maxLen);
+      for (const chunk of chunks) {
+        await adapter.sendText(agent.externalChatId, chunk);
+      }
+    }
+  });
+
   startScheduler(db, config, registry, channels);
 
-  console.log(`[angel] Started with ${registry.count()} tools, ${channels.all().length} channels`);
+  p.log.success(`Started with ${color.cyan(String(registry.count()))} tools, ${color.cyan(String(channels.all().length))} channels`);
+  p.log.info(`Model: ${color.dim(config.model)} | Timezone: ${color.dim(config.timezone)}`);
 
   process.on("SIGINT", async () => {
     console.log("\n[angel] Shutting down...");

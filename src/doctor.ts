@@ -1,105 +1,108 @@
+import * as p from "@clack/prompts";
+import color from "picocolors";
 import { existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { configExists, configPath, loadConfig } from "./config";
 
-interface Check {
-  name: string;
-  status: "ok" | "warn" | "fail";
-  message: string;
-}
-
 export async function runDoctor(): Promise<void> {
-  const checks: Check[] = [];
+  p.intro(color.bgCyan(color.black(" angel doctor ")));
 
-  checks.push({
-    name: "Bun version",
-    status: "ok",
-    message: Bun.version,
-  });
+  p.log.info(`Bun ${Bun.version}`);
 
-  if (configExists()) {
-    checks.push({ name: "Config file", status: "ok", message: configPath() });
-    const config = loadConfig();
+  if (!configExists()) {
+    p.log.warn(`Config not found. Run ${color.cyan("bun run setup")} first.`);
+    p.outro("Done.");
+    return;
+  }
 
-    if (config.openai_api_key) {
-      checks.push({ name: "OpenAI API key", status: "ok", message: "Set (***)" });
+  p.log.success(`Config: ${configPath()}`);
+  const config = loadConfig();
 
-      try {
-        const resp = await fetch("https://api.openai.com/v1/models", {
-          headers: { Authorization: `Bearer ${config.openai_api_key}` },
-        });
-        checks.push({
-          name: "OpenAI API",
-          status: resp.ok ? "ok" : "fail",
-          message: resp.ok ? "Connected" : `HTTP ${resp.status}`,
-        });
-      } catch (err: any) {
-        checks.push({ name: "OpenAI API", status: "fail", message: err.message });
+  if (config.openai_api_key) {
+    p.log.success("OpenAI API key: set");
+    const s = p.spinner();
+    s.start("Testing OpenAI API...");
+    try {
+      const resp = await fetch("https://api.openai.com/v1/models", {
+        headers: { Authorization: `Bearer ${config.openai_api_key}` },
+      });
+      if (resp.ok) {
+        s.stop("OpenAI API: connected");
+      } else {
+        s.stop(color.red(`OpenAI API: HTTP ${resp.status}`));
       }
-    } else {
-      checks.push({ name: "OpenAI API key", status: "fail", message: "Not set" });
-    }
-
-    if (config.channels.discord?.enabled) {
-      checks.push({
-        name: "Discord",
-        status: config.channels.discord.token ? "ok" : "warn",
-        message: config.channels.discord.token ? "Token set" : "No token",
-      });
-    }
-
-    if (config.channels.slack?.enabled) {
-      checks.push({
-        name: "Slack",
-        status: config.channels.slack.bot_token ? "ok" : "warn",
-        message: config.channels.slack.bot_token ? "Tokens set" : "Missing tokens",
-      });
-    }
-
-    if (config.channels.imessage?.enabled) {
-      const msgDb = join(homedir(), "Library", "Messages", "chat.db");
-      checks.push({
-        name: "iMessage",
-        status: existsSync(msgDb) ? "ok" : "warn",
-        message: existsSync(msgDb) ? "Messages DB accessible" : "Messages DB not found (need Full Disk Access)",
-      });
-    }
-
-    if (config.channels.signal?.enabled) {
-      try {
-        const proc = Bun.spawn(["which", "signal-cli"], { stdout: "pipe" });
-        const path = await new Response(proc.stdout).text();
-        checks.push({
-          name: "Signal CLI",
-          status: path.trim() ? "ok" : "warn",
-          message: path.trim() || "signal-cli not found in PATH",
-        });
-      } catch {
-        checks.push({ name: "Signal CLI", status: "warn", message: "signal-cli not found" });
-      }
+    } catch (err: any) {
+      s.stop(color.red(`OpenAI API: ${err.message}`));
     }
   } else {
-    checks.push({ name: "Config file", status: "warn", message: `Not found. Run 'angel setup' first.` });
+    p.log.error("OpenAI API key: not set");
+  }
+
+  if (config.channels.discord?.enabled) {
+    if (config.channels.discord.token) {
+      p.log.success("Discord: token set");
+    } else {
+      p.log.warn("Discord: enabled but no token");
+    }
+  }
+
+  if (config.channels.slack?.enabled) {
+    if (config.channels.slack.bot_token) {
+      p.log.success("Slack: tokens set");
+    } else {
+      p.log.warn("Slack: enabled but missing tokens");
+    }
+  }
+
+  if (config.channels.imessage?.enabled) {
+    const msgDb = join(homedir(), "Library", "Messages", "chat.db");
+    if (existsSync(msgDb)) {
+      p.log.success("iMessage: Messages DB accessible");
+    } else {
+      p.log.warn("iMessage: Messages DB not found (need Full Disk Access)");
+    }
+  }
+
+  if (config.channels.signal?.enabled) {
+    const cliPath = config.channels.signal.signal_cli_path || "signal-cli";
+    try {
+      const proc = Bun.spawn(["which", cliPath], { stdout: "pipe" });
+      const path = (await new Response(proc.stdout).text()).trim();
+      if (path) {
+        const ver = Bun.spawn([cliPath, "--version"], { stdout: "pipe", stderr: "pipe" });
+        const version = (await new Response(ver.stdout).text()).trim();
+        p.log.success(`Signal CLI: ${version || "found"} at ${path}`);
+
+        try {
+          const acc = Bun.spawn([cliPath, "listAccounts"], { stdout: "pipe", stderr: "pipe" });
+          const accounts = (await new Response(acc.stdout).text()).trim();
+          if (accounts) {
+            const count = accounts.split("\n").filter(Boolean).length;
+            p.log.info(`Signal accounts: ${count} registered`);
+          } else {
+            p.log.warn("Signal: no registered accounts");
+          }
+        } catch {}
+      } else {
+        p.log.warn(`Signal CLI: ${cliPath} not found in PATH`);
+      }
+    } catch {
+      p.log.warn(`Signal CLI: ${cliPath} not found`);
+    }
   }
 
   try {
     const proc = Bun.spawn(["which", "rg"], { stdout: "pipe" });
-    const path = await new Response(proc.stdout).text();
-    checks.push({
-      name: "ripgrep (rg)",
-      status: path.trim() ? "ok" : "warn",
-      message: path.trim() ? "Available" : "Not found (grep tool will use fallback)",
-    });
+    const path = (await new Response(proc.stdout).text()).trim();
+    if (path) {
+      p.log.success("ripgrep: available");
+    } else {
+      p.log.warn("ripgrep: not found (grep tool will use fallback)");
+    }
   } catch {
-    checks.push({ name: "ripgrep (rg)", status: "warn", message: "Not found" });
+    p.log.warn("ripgrep: not found");
   }
 
-  console.log("\n  Angel Doctor\n  ============\n");
-  for (const check of checks) {
-    const icon = check.status === "ok" ? "✓" : check.status === "warn" ? "⚠" : "✗";
-    const color = check.status === "ok" ? "\x1b[32m" : check.status === "warn" ? "\x1b[33m" : "\x1b[31m";
-    console.log(`  ${color}${icon}\x1b[0m ${check.name}: ${check.message}`);
-  }
-  console.log("");
+  p.outro("Done.");
 }
