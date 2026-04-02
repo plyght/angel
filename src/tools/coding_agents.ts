@@ -19,6 +19,17 @@ const AGENTS: Record<string, AgentDef> = {
     detect: () => which("claude"),
     installHint: "Install: bun add -g @anthropic-ai/claude-code",
   },
+  rose: {
+    command: "rose",
+    buildArgs: (prompt, opts) => {
+      const args = ["-p", "--output-format", "json", "--max-turns", "50", "--dangerously-skip-permissions"];
+      if (opts.model) args.push("--model", opts.model);
+      args.push(prompt);
+      return args;
+    },
+    detect: () => which("rose"),
+    installHint: "",
+  },
   codex: {
     command: "codex",
     buildArgs: (prompt, opts) => {
@@ -107,7 +118,7 @@ async function notify(agent: RunningAgent, message: string) {
 
 export const spawnCodingAgentTool: Tool = {
   name: "spawn_coding_agent",
-  description: `Spawn an external coding agent (claude, codex, aider, goose, amp) to work on a task in the background. The user is automatically notified when it finishes.`,
+  description: `Spawn an external coding agent (claude, rose, codex, aider, goose, amp) to work on a task in the background. The user is automatically notified when it finishes.`,
   parameters: {
     type: "object",
     properties: {
@@ -355,7 +366,7 @@ function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
 function extractSummary(agent: string, raw: string): string {
   if (!raw) return "";
 
-  if (agent === "claude") {
+  if (agent === "claude" || agent === "rose") {
     try {
       const json = JSON.parse(raw);
       const meta: string[] = [];

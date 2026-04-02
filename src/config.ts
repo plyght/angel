@@ -43,6 +43,7 @@ export interface McpServerConfig {
 
 export interface AngelConfig {
   openai_api_key: string;
+  anthropic_api_key?: string;
   model: string;
   max_tokens: number;
   max_tool_iterations: number;
@@ -93,7 +94,7 @@ export const DEFAULTS: AngelConfig = {
 };
 
 export function configPath(): string {
-  return process.env.ANGEL_CONFIG || join(DEFAULT_DATA_DIR, "angel.config.yaml");
+  return process.env.ANGEL_CONFIG || join(DEFAULT_DATA_DIR, "config");
 }
 
 export function configExists(): boolean {
