@@ -19,6 +19,7 @@ const AGENTS: Record<string, AgentDef> = {
     buildArgs: (prompt, opts) => {
       const args = [
         "-p",
+        "--verbose",
         "--output-format",
         "stream-json",
         "--max-turns",
@@ -38,6 +39,7 @@ const AGENTS: Record<string, AgentDef> = {
     buildArgs: (prompt, opts) => {
       const args = [
         "-p",
+        "--verbose",
         "--output-format",
         "stream-json",
         "--max-turns",
