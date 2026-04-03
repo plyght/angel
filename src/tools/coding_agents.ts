@@ -1,4 +1,6 @@
 import type { Tool, ToolContext, ToolResult } from "./registry";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { join } from "path";
 
 interface AgentDef {
   command: string;
@@ -623,6 +625,137 @@ export function killAllCodingAgents() {
       entry.finishedAt = new Date();
     }
   }
+}
+
+// Persistence for surviving restarts
+
+interface PersistedAgent {
+  id: number;
+  pid: number;
+  agent: string;
+  prompt: string;
+  cwd: string;
+  startedAt: string;
+  chatId: number;
+  channel: string;
+  externalChatId: string;
+}
+
+let dataDir: string | null = null;
+
+export function setCodingAgentDataDir(dir: string) {
+  dataDir = dir;
+}
+
+function getAgentsFilePath(): string | null {
+  if (!dataDir) return null;
+  return join(dataDir, "running_agents.json");
+}
+
+export function persistRunningAgents(): number {
+  const path = getAgentsFilePath();
+  if (!path) return 0;
+
+  const toPersist: PersistedAgent[] = [];
+  for (const entry of runningAgents.values()) {
+    if (entry.status === "running" && entry.process?.pid) {
+      toPersist.push({
+        id: entry.id,
+        pid: entry.process.pid,
+        agent: entry.agent,
+        prompt: entry.prompt,
+        cwd: entry.cwd,
+        startedAt: entry.startedAt.toISOString(),
+        chatId: entry.chatId,
+        channel: entry.channel,
+        externalChatId: entry.externalChatId,
+      });
+    }
+  }
+
+  if (toPersist.length > 0) {
+    writeFileSync(path, JSON.stringify(toPersist, null, 2));
+  } else if (existsSync(path)) {
+    unlinkSync(path);
+  }
+
+  return toPersist.length;
+}
+
+export function restoreRunningAgents(): number {
+  const path = getAgentsFilePath();
+  if (!path || !existsSync(path)) return 0;
+
+  let persisted: PersistedAgent[];
+  try {
+    persisted = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return 0;
+  }
+
+  // Clean up the file immediately
+  try { unlinkSync(path); } catch {}
+
+  let restored = 0;
+  for (const p of persisted) {
+    // Check if PID is still running
+    try {
+      process.kill(p.pid, 0); // Signal 0 just checks if process exists
+    } catch {
+      // Process not running, skip
+      continue;
+    }
+
+    // Update nextId to avoid conflicts
+    if (p.id >= nextId) nextId = p.id + 1;
+
+    // Create a restored entry (no process handle, but we'll monitor the PID)
+    const entry: RunningAgent = {
+      id: p.id,
+      agent: p.agent,
+      prompt: p.prompt,
+      cwd: p.cwd,
+      status: "running",
+      startedAt: new Date(p.startedAt),
+      process: null,
+      stdout: "(output unavailable - restored after restart)",
+      stderr: "",
+      chatId: p.chatId,
+      channel: p.channel,
+      externalChatId: p.externalChatId,
+      toolsUsed: [],
+      turnCount: 0,
+    };
+
+    runningAgents.set(p.id, entry);
+    restored++;
+
+    // Monitor the PID for completion
+    monitorPid(p.pid, entry);
+  }
+
+  return restored;
+}
+
+function monitorPid(pid: number, entry: RunningAgent) {
+  const check = () => {
+    try {
+      process.kill(pid, 0);
+      // Still running, check again in 5 seconds
+      setTimeout(check, 5000);
+    } catch {
+      // Process exited
+      entry.finishedAt = new Date();
+      const duration = formatDuration(entry.finishedAt.getTime() - entry.startedAt.getTime());
+
+      // We don't know the exit code, assume success if it ran this long
+      entry.status = "completed";
+      notify(entry, `Done — ${entry.agent} #${entry.id} finished in ${duration}.\n\n(Agent was running during restart, output not available)`);
+    }
+  };
+
+  // Start monitoring
+  setTimeout(check, 1000);
 }
 
 export const codingAgentTools = [spawnCodingAgentTool, codingAgentStatusTool, killCodingAgentTool, listCodingAgentsTool];

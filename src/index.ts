@@ -15,7 +15,7 @@ function getAllowedUsers(db: BunDatabase, channel: string, configList?: string[]
 
   return combined.size > 0 ? combined : null;
 }
-import { getDb, upsertChat } from "./db";
+import { getDb, upsertChat, storeMessage } from "./db";
 import { processMessage, INTERRUPTED } from "./agent";
 import { ToolRegistry } from "./tools/registry";
 import { ChannelRegistry, splitMessage } from "./channels/types";
@@ -28,7 +28,7 @@ import { scheduleTools } from "./tools/schedule";
 import { subagentTools } from "./tools/subagent";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { browserTool } from "./tools/browser";
-import { codingAgentTools, setCodingAgentNotifier, setCodingAgentProgressNotifier, killAllCodingAgents } from "./tools/coding_agents";
+import { codingAgentTools, setCodingAgentNotifier, setCodingAgentProgressNotifier, killAllCodingAgents, setCodingAgentDataDir, persistRunningAgents, restoreRunningAgents } from "./tools/coding_agents";
 import { confirmationTools } from "./tools/confirmation";
 import { handleCommand } from "./commands";
 import { handleExplicitMemory, scheduleReflector } from "./memory";
@@ -185,6 +185,9 @@ async function boot() {
   const registry = new ToolRegistry();
   const channels = new ChannelRegistry();
 
+  // Set up coding agent persistence directory
+  setCodingAgentDataDir(config.data_dir);
+
   registry.register(bashTool);
   registry.registerMany(fileTools);
   registry.registerMany(webTools);
@@ -263,6 +266,13 @@ async function boot() {
     if (cmdResult.handled) {
       const adapter = channels.get(msg.chatType.split("_")[0]);
       if (adapter) await adapter.sendText(msg.externalChatId, cmdResult.text);
+      if (cmdResult.action === "restart") {
+        const persisted = persistRunningAgents();
+        console.log(`[angel] Restart requested. Preserving ${persisted} running coding agent(s)...`);
+        await channels.stopAll();
+        await shutdownMcpServers();
+        process.exit(0);
+      }
       return;
     }
 
@@ -382,6 +392,12 @@ async function boot() {
       }
     }
   });
+
+  // Restore any coding agents that were running before restart
+  const restoredAgents = restoreRunningAgents();
+  if (restoredAgents > 0) {
+    p.log.info(`Restored ${color.cyan(String(restoredAgents))} coding agent(s) from previous session`);
+  }
 
   startScheduler(db, config, registry, channels);
 

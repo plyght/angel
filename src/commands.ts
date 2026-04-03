@@ -5,6 +5,7 @@ import { getMemories, getUsageStats } from "./db";
 export interface CommandResult {
   text: string;
   handled: boolean;
+  action?: "restart";
 }
 
 export function handleCommand(text: string, chatId: number, db: Database, config: AngelConfig): CommandResult {
@@ -27,6 +28,7 @@ export function handleCommand(text: string, chatId: number, db: Database, config
 /settings — Show current settings
 /clear — Clear session history
 /reset — Redo onboarding
+/restart — Restart the daemon
 /version — Show version`,
       };
 
@@ -88,6 +90,9 @@ Channels: ${enabledChannels.join(", ")}`,
       db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
       db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
       return { handled: true, text: "Onboarding reset! Send me a message to start fresh." };
+
+    case "/restart":
+      return { handled: true, text: "Restarting...", action: "restart" };
 
     case "/version":
       return { handled: true, text: "Angel v0.1.0" };
