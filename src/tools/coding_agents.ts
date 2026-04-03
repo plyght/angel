@@ -5,30 +5,33 @@ interface AgentDef {
   buildArgs: (prompt: string, opts: { workingDir: string; model?: string }) => string[];
   detect: () => Promise<string | null>;
   installHint: string;
+  supportsStreaming?: boolean;
 }
 
 const AGENTS: Record<string, AgentDef> = {
   claude: {
     command: "claude",
     buildArgs: (prompt, opts) => {
-      const args = ["-p", "--output-format", "json", "--max-turns", "50", "--dangerously-skip-permissions"];
+      const args = ["-p", "--output-format", "stream-json", "--max-turns", "50", "--dangerously-skip-permissions"];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
       return args;
     },
     detect: () => which("claude"),
     installHint: "Install: bun add -g @anthropic-ai/claude-code",
+    supportsStreaming: true,
   },
   rose: {
     command: "rose",
     buildArgs: (prompt, opts) => {
-      const args = ["-p", "--output-format", "json", "--max-turns", "50", "--dangerously-skip-permissions"];
+      const args = ["-p", "--output-format", "stream-json", "--max-turns", "50", "--dangerously-skip-permissions"];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
       return args;
     },
     detect: () => which("rose"),
     installHint: "",
+    supportsStreaming: true,
   },
   codex: {
     command: "codex",
@@ -99,20 +102,38 @@ export interface RunningAgent {
   chatId: number;
   channel: string;
   externalChatId: string;
+  // Progress tracking for streaming agents
+  currentTool?: string;
+  toolsUsed: string[];
+  turnCount: number;
+  sessionId?: string;
+  lastActivity?: string;
+  totalCostUsd?: number;
 }
 
 const runningAgents: Map<number, RunningAgent> = new Map();
 let nextId = 1;
 
 let notifyFn: ((agent: RunningAgent, message: string) => Promise<void>) | null = null;
+let progressFn: ((agent: RunningAgent, message: string) => Promise<void>) | null = null;
 
 export function setCodingAgentNotifier(fn: (agent: RunningAgent, message: string) => Promise<void>) {
   notifyFn = fn;
 }
 
+export function setCodingAgentProgressNotifier(fn: (agent: RunningAgent, message: string) => Promise<void>) {
+  progressFn = fn;
+}
+
 async function notify(agent: RunningAgent, message: string) {
   if (notifyFn) {
     try { await notifyFn(agent, message); } catch {}
+  }
+}
+
+async function notifyProgress(agent: RunningAgent, message: string) {
+  if (progressFn) {
+    try { await progressFn(agent, message); } catch {}
   }
 }
 
@@ -179,6 +200,8 @@ export const spawnCodingAgentTool: Tool = {
       chatId: ctx.chatId,
       channel: ctx.channel,
       externalChatId,
+      toolsUsed: [],
+      turnCount: 0,
     };
     runningAgents.set(id, entry);
 
@@ -191,17 +214,68 @@ export const spawnCodingAgentTool: Tool = {
       });
       entry.process = proc;
 
-      (async () => {
-        const reader = proc.stdout.getReader();
-        const decoder = new TextDecoder();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            entry.stdout += decoder.decode(value, { stream: true });
-          }
-        } catch {}
-      })();
+      // Process stdout - for streaming agents, parse NDJSON for progress
+      if (def.supportsStreaming) {
+        (async () => {
+          const reader = proc.stdout.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let lastProgressTime = 0;
+          const PROGRESS_THROTTLE_MS = 5000; // Don't send progress more than every 5s
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              entry.stdout = buffer;
+
+              // Process complete NDJSON lines
+              const lines = buffer.split("\n");
+              buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                  const event = JSON.parse(line);
+                  processStreamEvent(entry, event);
+
+                  // Send progress notification if enough time has passed
+                  const now = Date.now();
+                  if (entry.currentTool && now - lastProgressTime > PROGRESS_THROTTLE_MS) {
+                    lastProgressTime = now;
+                    const elapsed = formatDuration(now - entry.startedAt.getTime());
+                    const toolList = entry.toolsUsed.length > 0
+                      ? `Tools: ${[...new Set(entry.toolsUsed)].slice(-5).join(", ")}`
+                      : "";
+                    notifyProgress(entry, `[${elapsed}] Using ${entry.currentTool}... (turn ${entry.turnCount})${toolList ? "\n" + toolList : ""}`);
+                  }
+                } catch {
+                  // Not valid JSON, ignore
+                }
+              }
+            }
+            // Process any remaining buffer
+            if (buffer.trim()) {
+              entry.stdout = entry.stdout.endsWith("\n") ? entry.stdout + buffer : entry.stdout;
+            }
+          } catch {}
+        })();
+      } else {
+        // Non-streaming agents - just collect stdout
+        (async () => {
+          const reader = proc.stdout.getReader();
+          const decoder = new TextDecoder();
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              entry.stdout += decoder.decode(value, { stream: true });
+            }
+          } catch {}
+        })();
+      }
 
       (async () => {
         const reader = proc.stderr.getReader();
@@ -220,15 +294,16 @@ export const spawnCodingAgentTool: Tool = {
           await proc.exited;
           entry.exitCode = proc.exitCode;
           entry.finishedAt = new Date();
+          entry.currentTool = undefined;
           const duration = formatDuration(entry.finishedAt.getTime() - entry.startedAt.getTime());
 
           if (proc.exitCode === 0) {
             entry.status = "completed";
-            const summary = extractSummary(entry.agent, entry.stdout.trim());
+            const summary = extractSummary(entry, entry.stdout.trim());
             notify(entry, `Done — ${entry.agent} finished in ${duration}.\n\n${summary || "No output."}`);
           } else {
             entry.status = "failed";
-            const errOutput = extractSummary(entry.agent, (entry.stderr || entry.stdout).trim());
+            const errOutput = extractSummary(entry, (entry.stderr || entry.stdout).trim());
             notify(entry, `${entry.agent} failed (exit ${proc.exitCode}, ${duration}).\n\n${errOutput || "No output."}`);
           }
         } catch (err: any) {
@@ -344,8 +419,41 @@ function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
     `Duration: ${elapsed}`,
   ];
 
+  // Show progress info for running agents
+  if (entry.status === "running") {
+    if (entry.currentTool) {
+      lines.push(`Current: Using ${entry.currentTool}`);
+    } else if (entry.lastActivity) {
+      lines.push(`Activity: ${entry.lastActivity}`);
+    }
+    if (entry.turnCount > 0) {
+      lines.push(`Turns: ${entry.turnCount}`);
+    }
+    const uniqueTools = [...new Set(entry.toolsUsed)];
+    if (uniqueTools.length > 0) {
+      lines.push(`Tools used: ${uniqueTools.slice(-10).join(", ")}${uniqueTools.length > 10 ? "..." : ""}`);
+    }
+  }
+
   if (entry.exitCode !== undefined && entry.exitCode !== null) {
     lines.push(`Exit code: ${entry.exitCode}`);
+  }
+
+  // Show metadata for completed agents
+  if (entry.status !== "running") {
+    if (entry.totalCostUsd) {
+      lines.push(`Cost: $${entry.totalCostUsd.toFixed(4)}`);
+    }
+    if (entry.turnCount > 0) {
+      lines.push(`Turns: ${entry.turnCount}`);
+    }
+    if (entry.sessionId) {
+      lines.push(`Session: ${entry.sessionId.slice(0, 8)}...`);
+    }
+    const uniqueTools = [...new Set(entry.toolsUsed)];
+    if (uniqueTools.length > 0) {
+      lines.push(`Tools used: ${uniqueTools.join(", ")}`);
+    }
   }
 
   const output = entry.stdout.trim();
@@ -363,10 +471,116 @@ function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
   return lines.join("\n");
 }
 
-function extractSummary(agent: string, raw: string): string {
+/**
+ * Process a single NDJSON stream event from Claude/Rose to track progress
+ */
+function processStreamEvent(entry: RunningAgent, event: any): void {
+  const type = event.type;
+  const subtype = event.subtype;
+
+  // Track session ID from init or result
+  if (type === "system" && subtype === "init" && event.session_id) {
+    entry.sessionId = event.session_id;
+  }
+
+  // Track tool usage from stream events
+  if (type === "stream_event" && event.event) {
+    const streamEvent = event.event;
+
+    // Tool start: content_block_start with tool_use type
+    if (streamEvent.type === "content_block_start") {
+      const contentBlock = streamEvent.content_block;
+      if (contentBlock?.type === "tool_use" && contentBlock.name) {
+        entry.currentTool = contentBlock.name;
+        entry.toolsUsed.push(contentBlock.name);
+        entry.lastActivity = `Using ${contentBlock.name}`;
+      }
+    }
+
+    // Tool end: content_block_stop
+    if (streamEvent.type === "content_block_stop" && entry.currentTool) {
+      entry.lastActivity = `Finished ${entry.currentTool}`;
+      entry.currentTool = undefined;
+    }
+
+    // Message complete - increment turn count
+    if (streamEvent.type === "message_stop") {
+      entry.turnCount++;
+    }
+  }
+
+  // Assistant message indicates a new response
+  if (type === "assistant") {
+    entry.lastActivity = "Thinking...";
+  }
+
+  // API retry events
+  if (type === "system" && subtype === "api_retry") {
+    entry.lastActivity = `API retry (attempt ${event.attempt}/${event.max_retries})`;
+  }
+
+  // Result message - extract final metadata
+  if (type === "result") {
+    if (event.session_id) entry.sessionId = event.session_id;
+    if (event.total_cost_usd) entry.totalCostUsd = event.total_cost_usd;
+    if (event.num_turns) entry.turnCount = event.num_turns;
+    entry.lastActivity = event.is_error ? "Failed" : "Completed";
+  }
+}
+
+/**
+ * Extract a human-readable summary from agent output
+ * For streaming agents, parses NDJSON to find the result message
+ */
+function extractSummary(entry: RunningAgent, raw: string): string {
   if (!raw) return "";
 
-  if (agent === "claude" || agent === "rose") {
+  const agentName = entry.agent;
+
+  if (agentName === "claude" || agentName === "rose") {
+    // For stream-json output, find the result message in NDJSON
+    const lines = raw.split("\n").filter((l) => l.trim());
+    let resultEvent: any = null;
+
+    // Parse from end to find result message
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const event = JSON.parse(lines[i]);
+        if (event.type === "result") {
+          resultEvent = event;
+          break;
+        }
+      } catch {
+        // Not valid JSON
+      }
+    }
+
+    if (resultEvent) {
+      const meta: string[] = [];
+      if (resultEvent.is_error) meta.push("[error]");
+      if (entry.totalCostUsd || resultEvent.total_cost_usd) {
+        meta.push(`Cost: $${(entry.totalCostUsd || resultEvent.total_cost_usd).toFixed(4)}`);
+      }
+      const turns = entry.turnCount || resultEvent.num_turns;
+      if (turns) meta.push(`${turns} turns`);
+      if (resultEvent.duration_ms) meta.push(formatDuration(resultEvent.duration_ms));
+      if (entry.sessionId || resultEvent.session_id) {
+        meta.push(`Session: ${(entry.sessionId || resultEvent.session_id).slice(0, 8)}...`);
+      }
+
+      // Show tools used if any
+      const uniqueTools = [...new Set(entry.toolsUsed)];
+      if (uniqueTools.length > 0) {
+        meta.push(`Tools: ${uniqueTools.slice(0, 8).join(", ")}${uniqueTools.length > 8 ? "..." : ""}`);
+      }
+
+      const metaLine = meta.length ? meta.join(" | ") + "\n\n" : "";
+      const content = resultEvent.result || "";
+      const full = metaLine + content;
+      return full.slice(0, 8000) || raw.slice(0, 8000);
+    }
+
+    // Fallback: try parsing as single JSON (old format)
     try {
       const json = JSON.parse(raw);
       const meta: string[] = [];
@@ -374,6 +588,7 @@ function extractSummary(agent: string, raw: string): string {
       if (json.total_cost_usd) meta.push(`Cost: $${json.total_cost_usd.toFixed(4)}`);
       if (json.num_turns) meta.push(`${json.num_turns} turns`);
       if (json.duration_ms) meta.push(formatDuration(json.duration_ms));
+      if (json.session_id) meta.push(`Session: ${json.session_id.slice(0, 8)}...`);
       const metaLine = meta.length ? meta.join(" | ") + "\n\n" : "";
       const content = json.result || "";
       const full = metaLine + content;

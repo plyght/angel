@@ -28,7 +28,7 @@ import { scheduleTools } from "./tools/schedule";
 import { subagentTools } from "./tools/subagent";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { browserTool } from "./tools/browser";
-import { codingAgentTools, setCodingAgentNotifier, killAllCodingAgents } from "./tools/coding_agents";
+import { codingAgentTools, setCodingAgentNotifier, setCodingAgentProgressNotifier, killAllCodingAgents } from "./tools/coding_agents";
 import { confirmationTools } from "./tools/confirmation";
 import { handleCommand } from "./commands";
 import { handleExplicitMemory, scheduleReflector } from "./memory";
@@ -357,6 +357,18 @@ async function boot() {
         for (const chunk of chunks) {
           await adapter.sendText(agent.externalChatId, chunk);
         }
+      }
+    }
+  });
+
+  // Optional: Send progress updates for long-running coding agents
+  setCodingAgentProgressNotifier(async (agent, progressMessage) => {
+    const adapter = channels.get(agent.channel);
+    if (adapter && agent.externalChatId) {
+      try {
+        await adapter.sendText(agent.externalChatId, `[${agent.agent} #${agent.id}] ${progressMessage}`);
+      } catch (err: any) {
+        console.error(`[angel] Error sending progress: ${err.message}`);
       }
     }
   });
