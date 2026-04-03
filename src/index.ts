@@ -58,6 +58,7 @@ import { miscTools } from "./tools/misc";
 import { ToolRegistry } from "./tools/registry";
 import { remoteTools } from "./tools/remote";
 import { scheduleTools } from "./tools/schedule";
+import { emitMessageTool } from "./tools/emit_message";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { subagentTools } from "./tools/subagent";
 import { webTools } from "./tools/web";
@@ -226,6 +227,7 @@ async function boot() {
   registry.registerMany(scheduleTools);
   registry.registerMany(subagentTools);
   registry.register(sendMessageTool);
+  registry.register(emitMessageTool);
   registry.register(browserTool);
   registry.registerMany(codingAgentTools);
   registry.registerMany(confirmationTools);
@@ -405,6 +407,16 @@ async function boot() {
       const userText = msg.isGroupMention
         ? `[${msg.senderName}]: ${msg.text}`
         : msg.text;
+      const sendIntermediate = async (text: string) => {
+        if (adapter) {
+          const maxLen = adapter.maxMessageLength || 4000;
+          const chunks = splitResponse(text, maxLen);
+          for (const chunk of chunks) {
+            await adapter.sendText(msg.externalChatId, chunk);
+          }
+        }
+      };
+
       const response = await processMessage(
         userText,
         {
@@ -419,6 +431,7 @@ async function boot() {
           senderDmId: msg.isGroupMention
             ? msg.senderDmId || msg.senderName
             : undefined,
+          sendIntermediate,
         },
         image,
       );

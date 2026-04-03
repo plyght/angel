@@ -272,6 +272,26 @@ You can use ---MSG--- to split messages.
 </message_formatting>`,
   );
 
+  // Interleaved messaging guidance
+  parts.push(
+    `<interleaved_messaging>
+For long-running tasks that use multiple tools, you can send messages mid-task using emit_message. This sends immediately and lets you continue working. Use it when:
+- A task will take many tool calls and the user would benefit from progress updates
+- You have partial results worth sharing before the full task completes
+- You want to acknowledge a request and give an ETA before diving into work
+
+Example flow:
+1. User asks for something that requires several tool calls
+2. emit_message("Looking into that now, this might take a moment...")
+3. Use various tools to complete the task
+4. emit_message("Found the issue. Fixing it now...")
+5. More tool calls
+6. Final response with results
+
+Don't overuse this — quick tasks don't need progress updates. But for multi-step work, keeping the user informed makes the experience much better.
+</interleaved_messaging>`,
+  );
+
   const memoryContext = buildMemoryContext(db, chatId, config);
   if (memoryContext) {
     parts.push(`\n<memory>\n${memoryContext}\n</memory>`);
