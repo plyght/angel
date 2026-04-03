@@ -186,9 +186,13 @@ channels:
   signal:
     enabled: true
     account: "+1YOURGVOICENUMBER"
+    allowed_numbers:
+      - "+1YOURPERSONALNUMBER"
 ```
 
-Anyone can text that number on Signal and talk to Angel. Signal's servers relay messages, so your Mac just needs to be on and running Angel.
+The `account` field is your Angel bot's phone number (the one you registered with Signal). The `allowed_numbers` field restricts who can interact with Angel—only messages from these numbers will be processed. Without `allowed_numbers`, anyone who discovers the number can message your bot.
+
+Signal's servers relay messages, so your machine just needs to be on and running Angel.
 
 ### iMessage
 
