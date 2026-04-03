@@ -73,6 +73,10 @@ export class ChannelRegistry {
   }
 }
 
+/**
+ * Split a message into chunks based on maximum length.
+ * Used internally when a single message exceeds channel limits.
+ */
 export function splitMessage(text: string, maxLen: number): string[] {
   if (text.length <= maxLen) return [text];
 
@@ -91,6 +95,41 @@ export function splitMessage(text: string, maxLen: number): string[] {
 
     chunks.push(remaining.slice(0, splitAt));
     remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  return chunks;
+}
+
+/**
+ * Delimiter for intentional message splits.
+ * Angel can include this in a response to send multiple sequential messages.
+ */
+export const MESSAGE_SEPARATOR = "---MSG---";
+
+/**
+ * Split a response into multiple messages for sending.
+ *
+ * First splits on intentional MESSAGE_SEPARATOR delimiters (allowing Angel
+ * to segment responses naturally), then applies length-based splitting to
+ * any segments that exceed maxLen.
+ *
+ * @param text The response text to split
+ * @param maxLen Maximum message length for the channel
+ * @returns Array of message strings to send sequentially
+ */
+export function splitResponse(text: string, maxLen: number): string[] {
+  // First split on intentional message separators
+  const segments = text.split(MESSAGE_SEPARATOR).map((s) => s.trim()).filter(Boolean);
+
+  // If no separators found, fall back to length-based splitting
+  if (segments.length === 0) {
+    return splitMessage(text, maxLen);
+  }
+
+  // Apply length-based splitting to each segment
+  const chunks: string[] = [];
+  for (const segment of segments) {
+    chunks.push(...splitMessage(segment, maxLen));
   }
 
   return chunks;

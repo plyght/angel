@@ -30,7 +30,7 @@ import { DiscordChannel } from "./channels/discord";
 import { iMessageChannel } from "./channels/imessage";
 import { SignalChannel } from "./channels/signal";
 import { SlackChannel } from "./channels/slack";
-import { ChannelRegistry, splitMessage } from "./channels/types";
+import { ChannelRegistry, splitMessage, splitResponse } from "./channels/types";
 import { handleCommand } from "./commands";
 import { getDb, storeMessage, upsertChat } from "./db";
 import { runDoctor } from "./doctor";
@@ -432,7 +432,7 @@ async function boot() {
 
       if (adapter && response) {
         const maxLen = adapter.maxMessageLength || 4000;
-        const chunks = splitMessage(response, maxLen);
+        const chunks = splitResponse(response, maxLen);
         for (const chunk of chunks) {
           await adapter.sendText(msg.externalChatId, chunk);
         }
@@ -479,7 +479,7 @@ async function boot() {
         });
         if (typeof response === "string" && response) {
           const maxLen = adapter.maxMessageLength || 4000;
-          const chunks = splitMessage(response, maxLen);
+          const chunks = splitResponse(response, maxLen);
           for (const chunk of chunks) {
             await adapter.sendText(agent.externalChatId, chunk);
           }
@@ -487,7 +487,7 @@ async function boot() {
       } catch (err: any) {
         console.error(`[angel] Error processing agent result: ${err.message}`);
         const maxLen = adapter.maxMessageLength || 4000;
-        const chunks = splitMessage(message, maxLen);
+        const chunks = splitResponse(message, maxLen);
         for (const chunk of chunks) {
           await adapter.sendText(agent.externalChatId, chunk);
         }
