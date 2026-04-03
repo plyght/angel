@@ -38,7 +38,7 @@ bun install
 bun run setup
 ```
 
-The setup wizard walks through API key configuration, channel setup, and initial preferences. Configuration is stored at `~/.angel/angel.config.yaml`.
+The setup wizard walks through API key configuration, channel setup, and initial preferences. Configuration is stored at `~/.angel/config`.
 
 ## Usage
 
@@ -202,7 +202,7 @@ Requires macOS. Uses the local Messages database directly.
 
 ## Configuration
 
-Angel uses YAML configuration at `~/.angel/angel.config.yaml`:
+Angel uses YAML configuration at `~/.angel/config`:
 
 ```yaml
 openai_api_key: "${OPENAI_API_KEY}"
