@@ -12,11 +12,38 @@ export class SignalChannel implements ChannelAdapter {
   private cliPath: string;
   private process: any = null;
   private allowedNumbers: Set<string>;
+  // Mutex to serialize stdin writes and prevent interleaved JSON-RPC
+  private writeLock: Promise<void> = Promise.resolve();
 
   constructor(account: string, cliPath = "signal-cli", allowedNumbers?: string[]) {
     this.account = account;
     this.cliPath = cliPath;
     this.allowedNumbers = new Set(allowedNumbers ?? []);
+  }
+
+  /**
+   * Serialize writes to stdin to prevent concurrent JSON-RPC interleaving.
+   * Multiple callers can invoke send methods concurrently; this ensures
+   * each complete message is written atomically before the next begins.
+   */
+  private async serializedWrite(request: object): Promise<void> {
+    const doWrite = async () => {
+      if (!this.process?.stdin) return;
+      this.process.stdin.write(JSON.stringify(request) + "\n");
+      this.process.stdin.flush();
+    };
+
+    // Chain onto the existing lock to serialize writes
+    const previousLock = this.writeLock;
+    let resolve: () => void;
+    this.writeLock = new Promise((r) => { resolve = r; });
+
+    try {
+      await previousLock;
+      await doWrite();
+    } finally {
+      resolve!();
+    }
   }
 
   async start(onMessage: MessageHandler) {
@@ -191,8 +218,7 @@ export class SignalChannel implements ChannelAdapter {
         ? { groupId: externalChatId }
         : { recipient: [externalChatId] },
     };
-    this.process.stdin.write(JSON.stringify(request) + "\n");
-    this.process.stdin.flush();
+    await this.serializedWrite(request);
   }
 
   async sendText(externalChatId: string, text: string, quoteTimestamp?: number, quoteAuthor?: string) {
@@ -215,8 +241,7 @@ export class SignalChannel implements ChannelAdapter {
       params,
     };
 
-    this.process.stdin.write(JSON.stringify(request) + "\n");
-    this.process.stdin.flush();
+    await this.serializedWrite(request);
   }
 
   async sendAttachment(externalChatId: string, filePath: string, caption?: string) {
@@ -237,7 +262,6 @@ export class SignalChannel implements ChannelAdapter {
       params,
     };
 
-    this.process.stdin.write(JSON.stringify(request) + "\n");
-    this.process.stdin.flush();
+    await this.serializedWrite(request);
   }
 }

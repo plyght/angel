@@ -270,7 +270,7 @@ src/
 │   ├── discord.ts    Discord adapter
 │   ├── slack.ts      Slack adapter (Socket Mode)
 │   ├── imessage.ts   iMessage adapter (macOS)
-│   ├── signal.ts     Signal adapter (signal-cli)
+│   ├── signal.ts     Signal adapter (signal-cli, serialized stdin writes)
 │   └── types.ts      Channel interface definitions
 └── tools/
     ├── registry.ts       Tool registration and routing
