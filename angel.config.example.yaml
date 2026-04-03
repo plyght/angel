@@ -20,6 +20,8 @@ channels:
   # signal:
   #   enabled: true
   #   account: "+1234567890"
+  #   allowed_numbers:  # required - messages denied if empty
+  #     - "+1234567890"
 
 memory:
   reflector_enabled: true

@@ -190,7 +190,7 @@ channels:
       - "+1YOURPERSONALNUMBER"
 ```
 
-The `account` field is your Angel bot's phone number (the one you registered with Signal). The `allowed_numbers` field restricts who can interact with Angel—only messages from these numbers will be processed. Without `allowed_numbers`, anyone who discovers the number can message your bot.
+The `account` field is your Angel bot's phone number (the one you registered with Signal). The `allowed_numbers` field specifies who can interact with Angel—only messages from these numbers will be processed. **If `allowed_numbers` is empty or not configured, all messages are denied by default.** You must explicitly list the phone numbers that are permitted to use the bot.
 
 Signal's servers relay messages, so your machine just needs to be on and running Angel.
 
