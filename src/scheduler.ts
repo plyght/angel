@@ -1,11 +1,16 @@
 import type { Database } from "bun:sqlite";
-import type { AngelConfig } from "./config";
-import type { ToolRegistry } from "./tools/registry";
-import type { ChannelRegistry } from "./channels/types";
-import { getScheduledTasksDue, updateTaskNextRun, updateTaskStatus, insertTaskDlq, logUsage } from "./db";
-import { processMessage } from "./agent";
-import { splitMessage } from "./channels/types";
 import { CronExpressionParser } from "cron-parser";
+import { processMessage } from "./agent";
+import type { ChannelRegistry } from "./channels/types";
+import { splitMessage } from "./channels/types";
+import type { AngelConfig } from "./config";
+import {
+  getScheduledTasksDue,
+  insertTaskDlq,
+  updateTaskNextRun,
+  updateTaskStatus,
+} from "./db";
+import type { ToolRegistry } from "./tools/registry";
 
 const TICK_INTERVAL = 15_000;
 
@@ -13,7 +18,7 @@ export function startScheduler(
   db: Database,
   config: AngelConfig,
   registry: ToolRegistry,
-  channels: ChannelRegistry
+  channels: ChannelRegistry,
 ) {
   console.log("[angel] Scheduler started (15s tick)");
 
@@ -30,14 +35,16 @@ async function tick(
   db: Database,
   config: AngelConfig,
   registry: ToolRegistry,
-  channels: ChannelRegistry
+  channels: ChannelRegistry,
 ) {
   const dueTasks = getScheduledTasksDue(db);
   if (dueTasks.length === 0) return;
 
   for (const task of dueTasks) {
     try {
-      const chatRow = db.query("SELECT * FROM chats WHERE id = ?").get(task.chat_id) as any;
+      const chatRow = db
+        .query("SELECT * FROM chats WHERE id = ?")
+        .get(task.chat_id) as any;
       if (!chatRow) {
         updateTaskStatus(db, task.id, "failed");
         continue;
@@ -60,7 +67,13 @@ async function tick(
       db.run(
         `INSERT INTO task_run_logs (task_id, chat_id, started_at, finished_at, duration_ms, success, result_summary)
          VALUES (?, ?, datetime('now', '-' || ? || ' seconds'), datetime('now'), ?, 1, ?)`,
-        [task.id, task.chat_id, Math.floor(durationMs / 1000), durationMs, result.slice(0, 500)]
+        [
+          task.id,
+          task.chat_id,
+          Math.floor(durationMs / 1000),
+          durationMs,
+          result.slice(0, 500),
+        ],
       );
 
       if (!sentTracker.value) {
@@ -86,11 +99,23 @@ async function tick(
 
       if (retryCount >= (task.max_retries || 3)) {
         updateTaskStatus(db, task.id, "failed");
-        insertTaskDlq(db, task.id, task.chat_id, err.message, task.prompt, retryCount);
+        insertTaskDlq(
+          db,
+          task.id,
+          task.chat_id,
+          err.message,
+          task.prompt,
+          retryCount,
+        );
       } else {
-        db.run("UPDATE scheduled_tasks SET retry_count = ? WHERE id = ?", [retryCount, task.id]);
-        const backoffMinutes = Math.pow(2, retryCount);
-        const nextRetry = new Date(Date.now() + backoffMinutes * 60_000).toISOString();
+        db.run("UPDATE scheduled_tasks SET retry_count = ? WHERE id = ?", [
+          retryCount,
+          task.id,
+        ]);
+        const backoffMinutes = 2 ** retryCount;
+        const nextRetry = new Date(
+          Date.now() + backoffMinutes * 60_000,
+        ).toISOString();
         updateTaskNextRun(db, task.id, nextRetry);
       }
     }

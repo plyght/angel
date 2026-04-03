@@ -1,7 +1,7 @@
-import { readFileSync, existsSync } from "fs";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 export interface ChannelConfig {
   enabled?: boolean;

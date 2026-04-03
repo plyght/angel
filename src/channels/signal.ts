@@ -1,8 +1,8 @@
-import type { ChannelAdapter, MessageHandler, IncomingMessage } from "./types";
-import { readFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
+import { existsSync, readFileSync } from "fs";
 import OpenAI, { toFile } from "openai";
+import { homedir } from "os";
+import { join } from "path";
+import type { ChannelAdapter, IncomingMessage, MessageHandler } from "./types";
 
 export class SignalChannel implements ChannelAdapter {
   name = "signal";
@@ -15,7 +15,11 @@ export class SignalChannel implements ChannelAdapter {
   // Mutex to serialize stdin writes and prevent interleaved JSON-RPC
   private writeLock: Promise<void> = Promise.resolve();
 
-  constructor(account: string, cliPath = "signal-cli", allowedNumbers?: string[]) {
+  constructor(
+    account: string,
+    cliPath = "signal-cli",
+    allowedNumbers?: string[],
+  ) {
     this.account = account;
     this.cliPath = cliPath;
     this.allowedNumbers = new Set(allowedNumbers ?? []);
@@ -36,7 +40,9 @@ export class SignalChannel implements ChannelAdapter {
     // Chain onto the existing lock to serialize writes
     const previousLock = this.writeLock;
     let resolve: () => void;
-    this.writeLock = new Promise((r) => { resolve = r; });
+    this.writeLock = new Promise((r) => {
+      resolve = r;
+    });
 
     try {
       await previousLock;
@@ -49,14 +55,11 @@ export class SignalChannel implements ChannelAdapter {
   async start(onMessage: MessageHandler) {
     this.handler = onMessage;
 
-    this.process = Bun.spawn(
-      [this.cliPath, "-a", this.account, "jsonRpc"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        stdin: "pipe",
-      }
-    );
+    this.process = Bun.spawn([this.cliPath, "-a", this.account, "jsonRpc"], {
+      stdout: "pipe",
+      stderr: "pipe",
+      stdin: "pipe",
+    });
 
     this.readLoop();
     console.log(`[angel] Signal: JSON-RPC started for ${this.account}`);
@@ -95,8 +98,9 @@ export class SignalChannel implements ChannelAdapter {
     const envelope = msg.params?.envelope;
 
     // Handle reaction events (separate from regular messages)
-    const reaction = envelope?.dataMessage?.reaction ||
-                     envelope?.syncMessage?.sentMessage?.reaction;
+    const reaction =
+      envelope?.dataMessage?.reaction ||
+      envelope?.syncMessage?.sentMessage?.reaction;
     if (reaction) {
       await this.handleReaction(envelope, reaction);
       return;
@@ -104,14 +108,19 @@ export class SignalChannel implements ChannelAdapter {
 
     if (!envelope?.dataMessage) return;
     if (envelope.dataMessage.attachments?.length) {
-      console.log(`[angel] Signal attachments raw:`, JSON.stringify(envelope.dataMessage.attachments));
+      console.log(
+        `[angel] Signal attachments raw:`,
+        JSON.stringify(envelope.dataMessage.attachments),
+      );
     }
 
     const dataMsg = envelope.dataMessage;
     if (!dataMsg.message && !dataMsg.attachments?.length) return;
 
     if (!this.allowedNumbers.has(envelope.sourceNumber || "")) {
-      console.log(`[angel] Signal: blocked message from unauthorized number ${envelope.sourceNumber}`);
+      console.log(
+        `[angel] Signal: blocked message from unauthorized number ${envelope.sourceNumber}`,
+      );
       return;
     }
 
@@ -121,34 +130,44 @@ export class SignalChannel implements ChannelAdapter {
 
     const mentions = dataMsg.mentions || [];
     const selfNumber = this.account;
-    const isMentioned = mentions.some((m: any) => m.number === selfNumber) ||
+    const isMentioned =
+      mentions.some((m: any) => m.number === selfNumber) ||
       /\bangel\b/i.test(text);
 
     if (groupId && !isMentioned) return;
 
     if (dataMsg.quote) {
-      const quoteAuthor = dataMsg.quote.authorName || dataMsg.quote.authorNumber || "someone";
+      const quoteAuthor =
+        dataMsg.quote.authorName || dataMsg.quote.authorNumber || "someone";
       const quoteText = dataMsg.quote.text || "";
       text = `[replying to ${quoteAuthor}: "${quoteText}"]\n${text}`;
     }
 
     if (dataMsg.sticker) {
       const stickerEmoji = dataMsg.sticker.emoji || "";
-      text = text ? `${text}\n[sticker: ${stickerEmoji}]` : `[sticker: ${stickerEmoji}]`;
+      text = text
+        ? `${text}\n[sticker: ${stickerEmoji}]`
+        : `[sticker: ${stickerEmoji}]`;
     }
 
     if (dataMsg.contact?.length) {
       for (const c of dataMsg.contact) {
-        const name = [c.name?.givenName, c.name?.familyName].filter(Boolean).join(" ") || "Unknown";
+        const name =
+          [c.name?.givenName, c.name?.familyName].filter(Boolean).join(" ") ||
+          "Unknown";
         const phone = c.number?.[0]?.value || "";
-        text = text ? `${text}\n[shared contact: ${name} ${phone}]` : `[shared contact: ${name} ${phone}]`;
+        text = text
+          ? `${text}\n[shared contact: ${name} ${phone}]`
+          : `[shared contact: ${name} ${phone}]`;
       }
     }
 
     if (dataMsg.previews?.length) {
       for (const p of dataMsg.previews) {
         if (p.url) {
-          text = text ? `${text}\n[link preview: ${p.title || p.url}]` : `[link preview: ${p.title || p.url}]`;
+          text = text
+            ? `${text}\n[link preview: ${p.title || p.url}]`
+            : `[link preview: ${p.title || p.url}]`;
         }
       }
     }
@@ -164,13 +183,23 @@ export class SignalChannel implements ChannelAdapter {
     };
 
     const attachments = dataMsg.attachments || [];
-    const imageAttachment = attachments.find((a: any) => a.contentType?.startsWith("image/"));
+    const imageAttachment = attachments.find((a: any) =>
+      a.contentType?.startsWith("image/"),
+    );
     if (imageAttachment) {
-      const attDir = join(homedir(), ".local", "share", "signal-cli", "attachments");
+      const attDir = join(
+        homedir(),
+        ".local",
+        "share",
+        "signal-cli",
+        "attachments",
+      );
       const attId = imageAttachment.id || imageAttachment.filename;
       if (attId) {
         const attPath = join(attDir, attId);
-        console.log(`[angel] Signal attachment: ${attPath} exists=${existsSync(attPath)}`);
+        console.log(
+          `[angel] Signal attachment: ${attPath} exists=${existsSync(attPath)}`,
+        );
         if (existsSync(attPath)) {
           incoming.imageBase64 = readFileSync(attPath).toString("base64");
           incoming.imageMimeType = imageAttachment.contentType;
@@ -178,9 +207,17 @@ export class SignalChannel implements ChannelAdapter {
       }
     }
 
-    const audioAttachment = attachments.find((a: any) => a.contentType?.startsWith("audio/"));
+    const audioAttachment = attachments.find((a: any) =>
+      a.contentType?.startsWith("audio/"),
+    );
     if (audioAttachment) {
-      const attDir = join(homedir(), ".local", "share", "signal-cli", "attachments");
+      const attDir = join(
+        homedir(),
+        ".local",
+        "share",
+        "signal-cli",
+        "attachments",
+      );
       const attId = audioAttachment.id || audioAttachment.filename;
       if (attId) {
         const attPath = join(attDir, attId);
@@ -188,7 +225,10 @@ export class SignalChannel implements ChannelAdapter {
           try {
             const client = new OpenAI();
             const audioBuffer = readFileSync(attPath);
-            const file = await toFile(audioBuffer, audioAttachment.filename || "voice.m4a");
+            const file = await toFile(
+              audioBuffer,
+              audioAttachment.filename || "voice.m4a",
+            );
             const transcription = await client.audio.transcriptions.create({
               model: "whisper-1",
               file,
@@ -199,7 +239,9 @@ export class SignalChannel implements ChannelAdapter {
             } else {
               incoming.text = `${incoming.text}\n\n[voice message]: ${transcription.text}`;
             }
-            console.log(`[angel] Transcribed voice note: ${transcription.text}`);
+            console.log(
+              `[angel] Transcribed voice note: ${transcription.text}`,
+            );
           } catch (err: any) {
             console.error(`[angel] Voice transcription error: ${err.message}`);
           }
@@ -208,7 +250,7 @@ export class SignalChannel implements ChannelAdapter {
     }
 
     this.handler(incoming).catch((err) =>
-      console.error(`[angel] Signal handler error: ${err.message}`)
+      console.error(`[angel] Signal handler error: ${err.message}`),
     );
   }
 
@@ -221,21 +263,25 @@ export class SignalChannel implements ChannelAdapter {
 
     const sourceNumber = envelope.sourceNumber || envelope.source;
     if (!this.allowedNumbers.has(sourceNumber || "")) {
-      console.log(`[angel] Signal: blocked reaction from unauthorized number ${sourceNumber}`);
+      console.log(
+        `[angel] Signal: blocked reaction from unauthorized number ${sourceNumber}`,
+      );
       return;
     }
 
     const sender = envelope.sourceName || sourceNumber || "Unknown";
     const emoji = reaction.emoji || "";
     const isRemove = reaction.isRemove || false;
-    const targetAuthor = reaction.targetAuthorNumber || reaction.targetAuthor || "someone";
+    const targetAuthor =
+      reaction.targetAuthorNumber || reaction.targetAuthor || "someone";
 
     // Determine if this reaction is on Angel's own message
     const isReactionToSelf = targetAuthor === this.account;
 
     // Determine the chat context (group or private)
-    const groupId = envelope.dataMessage?.groupInfo?.groupId ||
-                    envelope.syncMessage?.sentMessage?.groupInfo?.groupId;
+    const groupId =
+      envelope.dataMessage?.groupInfo?.groupId ||
+      envelope.syncMessage?.sentMessage?.groupInfo?.groupId;
     const externalChatId = groupId || sourceNumber || "";
     const chatType = groupId ? "signal_group" : "signal_private";
 
@@ -277,7 +323,7 @@ export class SignalChannel implements ChannelAdapter {
     };
 
     this.handler(incoming).catch((err) =>
-      console.error(`[angel] Signal reaction handler error: ${err.message}`)
+      console.error(`[angel] Signal reaction handler error: ${err.message}`),
     );
   }
 
@@ -299,7 +345,12 @@ export class SignalChannel implements ChannelAdapter {
     await this.serializedWrite(request);
   }
 
-  async sendText(externalChatId: string, text: string, quoteTimestamp?: number, quoteAuthor?: string) {
+  async sendText(
+    externalChatId: string,
+    text: string,
+    quoteTimestamp?: number,
+    quoteAuthor?: string,
+  ) {
     if (!this.process?.stdin) return;
 
     const isGroup = externalChatId.length > 20;
@@ -322,7 +373,11 @@ export class SignalChannel implements ChannelAdapter {
     await this.serializedWrite(request);
   }
 
-  async sendAttachment(externalChatId: string, filePath: string, caption?: string) {
+  async sendAttachment(
+    externalChatId: string,
+    filePath: string,
+    caption?: string,
+  ) {
     if (!this.process?.stdin) return;
 
     const isGroup = externalChatId.length > 20;

@@ -60,7 +60,11 @@ export class ToolRegistry {
     }));
   }
 
-  async execute(name: string, input: any, ctx: ToolContext): Promise<ToolResult> {
+  async execute(
+    name: string,
+    input: any,
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
     const tool = this.tools.get(name);
     if (!tool) {
       return { output: `Unknown tool: ${name}`, isError: true };

@@ -19,18 +19,25 @@ function isPrivateUrl(url: string): boolean {
 
 export const webSearchTool: Tool = {
   name: "web_search",
-  description: "Search the web for information. Returns relevant search results with snippets.",
+  description:
+    "Search the web for information. Returns relevant search results with snippets.",
   parameters: {
     type: "object",
     properties: {
       query: { type: "string", description: "Search query" },
-      max_results: { type: "number", description: "Maximum results (default: 5)" },
+      max_results: {
+        type: "number",
+        description: "Maximum results (default: 5)",
+      },
     },
     required: ["query"],
   },
   risk: "low",
 
-  async execute(input: { query: string; max_results?: number }): Promise<ToolResult> {
+  async execute(input: {
+    query: string;
+    max_results?: number;
+  }): Promise<ToolResult> {
     try {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`;
       const resp = await fetch(url, {
@@ -39,22 +46,31 @@ export const webSearchTool: Tool = {
       const html = await resp.text();
 
       const results: string[] = [];
-      const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
-      const snippetRegex = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      const resultRegex =
+        /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+      const snippetRegex =
+        /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
 
-      let match;
       const max = input.max_results || 5;
       let i = 0;
-      while ((match = resultRegex.exec(html)) && i < max) {
+      for (
+        let match = resultRegex.exec(html);
+        match !== null && i < max;
+        match = resultRegex.exec(html)
+      ) {
         const title = match[2].replace(/<[^>]+>/g, "").trim();
         const href = match[1];
         const snippetMatch = snippetRegex.exec(html);
-        const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, "").trim() : "";
+        const snippet = snippetMatch
+          ? snippetMatch[1].replace(/<[^>]+>/g, "").trim()
+          : "";
         results.push(`[${i + 1}] ${title}\n    ${href}\n    ${snippet}`);
         i++;
       }
 
-      return { output: results.length > 0 ? results.join("\n\n") : "No results found" };
+      return {
+        output: results.length > 0 ? results.join("\n\n") : "No results found",
+      };
     } catch (err: any) {
       return { output: `Search error: ${err.message}`, isError: true };
     }
@@ -68,17 +84,26 @@ export const webFetchTool: Tool = {
     type: "object",
     properties: {
       url: { type: "string", description: "URL to fetch" },
-      max_length: { type: "number", description: "Max characters to return (default: 20000)" },
+      max_length: {
+        type: "number",
+        description: "Max characters to return (default: 20000)",
+      },
     },
     required: ["url"],
   },
   risk: "low",
 
-  async execute(input: { url: string; max_length?: number }): Promise<ToolResult> {
+  async execute(input: {
+    url: string;
+    max_length?: number;
+  }): Promise<ToolResult> {
     const maxLen = input.max_length || 20000;
     try {
       if (isPrivateUrl(input.url)) {
-        return { output: "Access denied: private/internal addresses are blocked", isError: true };
+        return {
+          output: "Access denied: private/internal addresses are blocked",
+          isError: true,
+        };
       }
       const resp = await fetch(input.url, {
         headers: { "User-Agent": "Angel/1.0" },
@@ -86,7 +111,10 @@ export const webFetchTool: Tool = {
       });
 
       if (!resp.ok) {
-        return { output: `HTTP ${resp.status}: ${resp.statusText}`, isError: true };
+        return {
+          output: `HTTP ${resp.status}: ${resp.statusText}`,
+          isError: true,
+        };
       }
 
       const contentType = resp.headers.get("content-type") || "";
@@ -119,7 +147,10 @@ function stripHtml(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 
-  text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  text = text
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return text;
 }
 

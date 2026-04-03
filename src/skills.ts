@@ -1,7 +1,7 @@
-import type { AngelConfig } from "./config";
-import type { Tool, ToolContext, ToolResult } from "./tools/registry";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import type { AngelConfig } from "./config";
+import type { Tool, ToolResult } from "./tools/registry";
 
 interface SkillDef {
   name: string;
@@ -38,7 +38,8 @@ export function discoverSkills(config: AngelConfig): Tool[] {
 
 const activateSkillTool: Tool = {
   name: "activate_skill",
-  description: "Activate a skill to get specialized instructions. Use list_skills to see available skills.",
+  description:
+    "Activate a skill to get specialized instructions. Use list_skills to see available skills.",
   parameters: {
     type: "object",
     properties: {
@@ -52,11 +53,16 @@ const activateSkillTool: Tool = {
     const skill = skillCache.get(input.name);
     if (!skill) {
       const available = [...skillCache.keys()].join(", ");
-      return { output: `Skill "${input.name}" not found. Available: ${available}`, isError: true };
+      return {
+        output: `Skill "${input.name}" not found. Available: ${available}`,
+        isError: true,
+      };
     }
 
     skill.activated = true;
-    return { output: `Skill "${input.name}" activated.\n\n${skill.instruction}` };
+    return {
+      output: `Skill "${input.name}" activated.\n\n${skill.instruction}`,
+    };
   },
 };
 

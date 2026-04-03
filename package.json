@@ -11,7 +11,11 @@
     "doctor": "bun run src/index.ts doctor",
     "config": "bun run src/index.ts config",
     "reset": "bun run src/index.ts reset",
-    "dev": "bun --watch run src/index.ts start"
+    "dev": "bun --watch run src/index.ts start",
+    "lint": "bunx biome check src",
+    "fix": "bunx biome check --fix src",
+    "format": "bunx biome format --write src",
+    "build": "bun build src/index.ts --compile --outfile angel"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
@@ -26,6 +30,7 @@
     "yaml": "^2.7.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.10",
     "@types/bun": "latest"
   }
 }

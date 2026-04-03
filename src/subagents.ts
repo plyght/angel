@@ -1,1 +1,5 @@
-export { spawnSubagentTool, listSubagentsTool, subagentTools } from "./tools/subagent";
+export {
+  listSubagentsTool,
+  spawnSubagentTool,
+  subagentTools,
+} from "./tools/subagent";

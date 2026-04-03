@@ -1,11 +1,15 @@
 import type { Database } from "bun:sqlite";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import type { AngelConfig } from "./config";
-import { getMemories, insertMemory, archiveMemory } from "./db";
+import { archiveMemory, getMemories, insertMemory } from "./db";
 import { chatComplete, type LlmMessage } from "./llm";
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
 
-export function buildMemoryContext(db: Database, chatId: number, config: AngelConfig): string {
+export function buildMemoryContext(
+  db: Database,
+  chatId: number,
+  config: AngelConfig,
+): string {
   const parts: string[] = [];
 
   const agentsMdPaths = [
@@ -22,18 +26,29 @@ export function buildMemoryContext(db: Database, chatId: number, config: AngelCo
 
   const memories = getMemories(db, chatId, 20);
   if (memories.length > 0) {
-    const formatted = memories.map((m: any) =>
-      `- [${m.category}] ${m.content} (confidence: ${m.confidence})`
-    ).join("\n");
+    const formatted = memories
+      .map(
+        (m: any) =>
+          `- [${m.category}] ${m.content} (confidence: ${m.confidence})`,
+      )
+      .join("\n");
     parts.push(`[Structured Memories]\n${formatted}`);
   }
 
   return parts.join("\n\n");
 }
 
-export function handleExplicitMemory(text: string, db: Database, chatId: number): string | null {
+export function handleExplicitMemory(
+  text: string,
+  db: Database,
+  chatId: number,
+): string | null {
   const lower = text.toLowerCase().trim();
-  if (!lower.startsWith("remember:") && !lower.startsWith("/memory:") && !lower.startsWith("remember ")) {
+  if (
+    !lower.startsWith("remember:") &&
+    !lower.startsWith("/memory:") &&
+    !lower.startsWith("remember ")
+  ) {
     return null;
   }
 
@@ -51,7 +66,12 @@ export function handleExplicitMemory(text: string, db: Database, chatId: number)
   return `Remembered: "${fact}"`;
 }
 
-export async function runMemoryReflector(db: Database, chatId: number, config: AngelConfig, recentMessages: string[]): Promise<void> {
+export async function runMemoryReflector(
+  db: Database,
+  chatId: number,
+  config: AngelConfig,
+  recentMessages: string[],
+): Promise<void> {
   if (!config.memory.reflector_enabled) return;
   if (recentMessages.length < 3) return;
 
@@ -81,31 +101,49 @@ Output only valid JSON array, nothing else.`,
       if (!fact.content || fact.content.length < 5) continue;
 
       const isDuplicate = existing.some(
-        (m: any) => jaccardSimilarity(m.content, fact.content) > 0.55
+        (m: any) => jaccardSimilarity(m.content, fact.content) > 0.55,
       );
       if (isDuplicate) {
         skipped++;
         continue;
       }
 
-      insertMemory(db, chatId, fact.content, fact.category || "general", "reflector");
+      insertMemory(
+        db,
+        chatId,
+        fact.content,
+        fact.category || "general",
+        "reflector",
+      );
       inserted++;
     }
 
     db.run(
       `INSERT INTO memory_reflector_runs (chat_id, started_at, finished_at, extracted_count, inserted_count, skipped_count)
        VALUES (?, datetime('now'), datetime('now'), ?, ?, ?)`,
-      [chatId, facts.length, inserted, skipped]
+      [chatId, facts.length, inserted, skipped],
     );
   } catch (err: any) {
     console.error(`[angel] Memory reflector error: ${err.message}`);
   }
 }
 
-export function writeAgentsMd(config: AngelConfig, content: string, chatId?: number, channel?: string): void {
+export function writeAgentsMd(
+  config: AngelConfig,
+  content: string,
+  chatId?: number,
+  channel?: string,
+): void {
   let path: string;
   if (chatId && channel) {
-    path = join(config.data_dir, "runtime", "groups", channel, String(chatId), "AGENTS.md");
+    path = join(
+      config.data_dir,
+      "runtime",
+      "groups",
+      channel,
+      String(chatId),
+      "AGENTS.md",
+    );
   } else {
     path = join(config.data_dir, "AGENTS.md");
   }
@@ -127,7 +165,12 @@ function jaccardSimilarity(a: string, b: string): number {
 
 const reflectorTimers: Map<number, number> = new Map();
 
-export function scheduleReflector(db: Database, chatId: number, config: AngelConfig, messages: string[]) {
+export function scheduleReflector(
+  db: Database,
+  chatId: number,
+  config: AngelConfig,
+  messages: string[],
+) {
   const lastRun = reflectorTimers.get(chatId) || 0;
   const now = Date.now();
   if (now - lastRun < config.memory.reflector_interval_ms) return;

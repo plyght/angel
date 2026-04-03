@@ -1,8 +1,8 @@
-import type { ChannelAdapter, MessageHandler, IncomingMessage } from "./types";
 import { Database } from "bun:sqlite";
 import { existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import type { ChannelAdapter, IncomingMessage, MessageHandler } from "./types";
 
 const MESSAGES_DB_PATH = join(homedir(), "Library", "Messages", "chat.db");
 const POLL_INTERVAL = 2000;
@@ -19,19 +19,25 @@ export class iMessageChannel implements ChannelAdapter {
     this.handler = onMessage;
 
     if (!existsSync(MESSAGES_DB_PATH)) {
-      console.error("[angel] iMessage: Messages database not found. Ensure Full Disk Access is granted.");
+      console.error(
+        "[angel] iMessage: Messages database not found. Ensure Full Disk Access is granted.",
+      );
       return;
     }
 
     try {
       this.messagesDb = new Database(MESSAGES_DB_PATH, { readonly: true });
-      const latest = this.messagesDb.query("SELECT MAX(ROWID) as max_id FROM message").get() as any;
+      const latest = this.messagesDb
+        .query("SELECT MAX(ROWID) as max_id FROM message")
+        .get() as any;
       this.lastRowId = latest?.max_id || 0;
 
       this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL);
       console.log("[angel] iMessage: Polling started");
     } catch (err: any) {
-      console.error(`[angel] iMessage: Failed to open database: ${err.message}`);
+      console.error(
+        `[angel] iMessage: Failed to open database: ${err.message}`,
+      );
     }
   }
 
@@ -44,7 +50,8 @@ export class iMessageChannel implements ChannelAdapter {
     if (!this.messagesDb || !this.handler) return;
 
     try {
-      const rows = this.messagesDb.query(`
+      const rows = this.messagesDb
+        .query(`
         SELECT m.ROWID, m.text, m.is_from_me, m.date,
                c.chat_identifier, c.display_name,
                h.id as sender_id
@@ -55,7 +62,8 @@ export class iMessageChannel implements ChannelAdapter {
         WHERE m.ROWID > ? AND m.is_from_me = 0 AND m.text IS NOT NULL
         ORDER BY m.ROWID ASC
         LIMIT 10
-      `).all(this.lastRowId) as any[];
+      `)
+        .all(this.lastRowId) as any[];
 
       for (const row of rows) {
         const isGroup = row.chat_identifier.startsWith("chat");

@@ -1,5 +1,5 @@
-import type { ChannelAdapter, MessageHandler, IncomingMessage } from "./types";
 import { Client, GatewayIntentBits, type Message } from "discord.js";
+import type { ChannelAdapter, IncomingMessage, MessageHandler } from "./types";
 
 export class DiscordChannel implements ChannelAdapter {
   name = "discord";
@@ -7,7 +7,6 @@ export class DiscordChannel implements ChannelAdapter {
   private client: Client | null = null;
   private handler: MessageHandler | null = null;
   private token: string;
-  private botUsername: string;
 
   constructor(token: string, botUsername?: string) {
     this.token = token;
@@ -50,7 +49,7 @@ export class DiscordChannel implements ChannelAdapter {
       };
 
       this.handler(incoming).catch((err) =>
-        console.error(`[angel] Discord handler error: ${err.message}`)
+        console.error(`[angel] Discord handler error: ${err.message}`),
       );
     });
 

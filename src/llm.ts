@@ -1,6 +1,6 @@
-import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "crypto";
+import OpenAI from "openai";
 import xxhash from "xxhash-wasm";
 import type { AngelConfig } from "./config";
 
@@ -8,8 +8,8 @@ let _openaiClient: OpenAI | null = null;
 let _anthropicClient: Anthropic | null = null;
 let _isOAuthClient = false;
 
-const CCH_SEED = 0x6E52736AC806831En;
-const CCH_MASK = 0xFFFFFn;
+const CCH_SEED = 0x6e52736ac806831en;
+const CCH_MASK = 0xfffffn;
 const CCH_PLACEHOLDER = "cch=00000";
 const FINGERPRINT_SALT = "59cf53e54c78";
 const CC_VERSION = "2.1.87";
@@ -28,7 +28,7 @@ async function computeCch(body: string): Promise<string> {
 
 function computeFingerprint(firstUserMessage: string): string {
   const indices = [4, 7, 20];
-  const chars = indices.map(i => firstUserMessage[i] || "0").join("");
+  const chars = indices.map((i) => firstUserMessage[i] || "0").join("");
   const input = `${FINGERPRINT_SALT}${chars}${CC_VERSION}`;
   return createHash("sha256").update(input).digest("hex").slice(0, 3);
 }
@@ -77,7 +77,8 @@ function getAnthropicClient(config: AngelConfig): Anthropic {
       apiKey: null,
       authToken: oauthToken,
       defaultHeaders: {
-        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
+        "anthropic-beta":
+          "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14",
         "User-Agent": `rose-cli/${CC_VERSION} (external, cli)`,
         "x-app": "cli",
       },
@@ -87,7 +88,7 @@ function getAnthropicClient(config: AngelConfig): Anthropic {
   }
 
   throw new Error(
-    "No Anthropic credentials found. Set anthropic_api_key in config, or log in via rose (rose auth login)."
+    "No Anthropic credentials found. Set anthropic_api_key in config, or log in via rose (rose auth login).",
   );
 }
 
@@ -95,7 +96,7 @@ function loadRoseOAuthToken(): string | null {
   try {
     const result = Bun.spawnSync(
       ["security", "find-generic-password", "-s", "Rose-credentials", "-w"],
-      { stdout: "pipe", stderr: "pipe" }
+      { stdout: "pipe", stderr: "pipe" },
     );
     if (result.exitCode !== 0) return null;
     const raw = result.stdout.toString().trim();
@@ -114,7 +115,10 @@ function loadRoseOAuthToken(): string | null {
   }
 }
 
-function refreshRoseOAuthToken(refreshToken: string, scopes: string[]): string | null {
+function refreshRoseOAuthToken(
+  refreshToken: string,
+  scopes: string[],
+): string | null {
   if (!refreshToken) return null;
   try {
     const body = new URLSearchParams({
@@ -125,10 +129,18 @@ function refreshRoseOAuthToken(refreshToken: string, scopes: string[]): string |
     });
 
     const resp = Bun.spawnSync(
-      ["curl", "-s", "-X", "POST", "https://platform.claude.com/v1/oauth/token",
-       "-H", "Content-Type: application/x-www-form-urlencoded",
-       "-d", body.toString()],
-      { stdout: "pipe", stderr: "pipe" }
+      [
+        "curl",
+        "-s",
+        "-X",
+        "POST",
+        "https://platform.claude.com/v1/oauth/token",
+        "-H",
+        "Content-Type: application/x-www-form-urlencoded",
+        "-d",
+        body.toString(),
+      ],
+      { stdout: "pipe", stderr: "pipe" },
     );
     if (resp.exitCode !== 0) return null;
     const json = JSON.parse(resp.stdout.toString().trim());
@@ -143,9 +155,18 @@ function refreshRoseOAuthToken(refreshToken: string, scopes: string[]): string |
       },
     };
     Bun.spawnSync(
-      ["security", "add-generic-password", "-U", "-s", "Rose-credentials",
-       "-a", process.env.USER || "angel", "-w", JSON.stringify(newData)],
-      { stdout: "pipe", stderr: "pipe" }
+      [
+        "security",
+        "add-generic-password",
+        "-U",
+        "-s",
+        "Rose-credentials",
+        "-a",
+        process.env.USER || "angel",
+        "-w",
+        JSON.stringify(newData),
+      ],
+      { stdout: "pipe", stderr: "pipe" },
     );
 
     _anthropicClient = null;
@@ -191,7 +212,7 @@ export async function chatComplete(
     model?: string;
     maxTokens?: number;
     onTextDelta?: (delta: string) => void;
-  }
+  },
 ): Promise<LlmResponse> {
   const model = opts?.model || config.model;
 
@@ -203,13 +224,20 @@ export async function chatComplete(
   const maxTokens = opts?.maxTokens || config.max_tokens;
 
   if (opts?.onTextDelta) {
-    return streamChatComplete(client, model, messages, tools, maxTokens, opts.onTextDelta);
+    return streamChatComplete(
+      client,
+      model,
+      messages,
+      tools,
+      maxTokens,
+      opts.onTextDelta,
+    );
   }
 
   const response = await client.chat.completions.create({
     model,
     messages: messages as any,
-    tools: tools.length > 0 ? tools as any : undefined,
+    tools: tools.length > 0 ? (tools as any) : undefined,
     max_completion_tokens: maxTokens,
   } as any);
 
@@ -232,7 +260,8 @@ export async function chatComplete(
 
 function extractFirstUserText(messages: LlmMessage[]): string {
   for (const msg of messages) {
-    if (msg.role === "user" && typeof msg.content === "string") return msg.content;
+    if (msg.role === "user" && typeof msg.content === "string")
+      return msg.content;
   }
   return "";
 }
@@ -245,13 +274,14 @@ async function claudeChatComplete(
   opts?: {
     maxTokens?: number;
     onTextDelta?: (delta: string) => void;
-  }
+  },
 ): Promise<LlmResponse> {
   const client = getAnthropicClient(config);
   const maxTokens = opts?.maxTokens || config.max_tokens;
 
   let systemPrompt = "";
-  const anthropicMessages: Array<{ role: "user" | "assistant"; content: any }> = [];
+  const anthropicMessages: Array<{ role: "user" | "assistant"; content: any }> =
+    [];
 
   for (const msg of messages) {
     if (msg.role === "system") {
@@ -264,7 +294,9 @@ async function claudeChatComplete(
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
           let parsedInput: any = {};
-          try { parsedInput = JSON.parse(tc.function.arguments); } catch {}
+          try {
+            parsedInput = JSON.parse(tc.function.arguments);
+          } catch {}
           content.push({
             type: "tool_use",
             id: tc.id,
@@ -279,11 +311,13 @@ async function claudeChatComplete(
     } else if (msg.role === "tool") {
       anthropicMessages.push({
         role: "user",
-        content: [{
-          type: "tool_result",
-          tool_use_id: msg.tool_call_id,
-          content: msg.content,
-        }],
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: msg.tool_call_id,
+            content: msg.content,
+          },
+        ],
       });
     }
   }
@@ -305,14 +339,22 @@ async function claudeChatComplete(
   }
 
   if (systemPrompt) {
-    systemBlocks.push({ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } });
+    systemBlocks.push({
+      type: "text",
+      text: systemPrompt,
+      cache_control: { type: "ephemeral" },
+    });
   }
 
   const params: any = {
     model,
     max_tokens: maxTokens,
     messages: mergedMessages,
-    betas: ["claude-code-20250219", "oauth-2025-04-20", "interleaved-thinking-2025-05-14"],
+    betas: [
+      "claude-code-20250219",
+      "oauth-2025-04-20",
+      "interleaved-thinking-2025-05-14",
+    ],
   };
   if (systemBlocks.length > 0) params.system = systemBlocks;
   if (anthropicTools.length > 0) params.tools = anthropicTools;
@@ -341,7 +383,10 @@ async function claudeChatComplete(
   return {
     text,
     toolCalls,
-    finishReason: response.stop_reason === "end_turn" ? "stop" : response.stop_reason || "stop",
+    finishReason:
+      response.stop_reason === "end_turn"
+        ? "stop"
+        : response.stop_reason || "stop",
     usage: {
       inputTokens: response.usage?.input_tokens || 0,
       outputTokens: response.usage?.output_tokens || 0,
@@ -352,12 +397,15 @@ async function claudeChatComplete(
 async function streamClaudeChat(
   client: Anthropic,
   params: any,
-  onTextDelta: (delta: string) => void
+  onTextDelta: (delta: string) => void,
 ): Promise<LlmResponse> {
   const stream = client.beta.messages.stream(params);
 
   let text = "";
-  const toolCalls: Map<string, { id: string; name: string; arguments: string }> = new Map();
+  const toolCalls: Map<
+    string,
+    { id: string; name: string; arguments: string }
+  > = new Map();
   let currentToolId = "";
 
   stream.on("text", (delta) => {
@@ -387,7 +435,10 @@ async function streamClaudeChat(
   return {
     text,
     toolCalls: [...toolCalls.values()],
-    finishReason: finalMessage.stop_reason === "end_turn" ? "stop" : finalMessage.stop_reason || "stop",
+    finishReason:
+      finalMessage.stop_reason === "end_turn"
+        ? "stop"
+        : finalMessage.stop_reason || "stop",
     usage: {
       inputTokens: finalMessage.usage?.input_tokens || 0,
       outputTokens: finalMessage.usage?.output_tokens || 0,
@@ -396,14 +447,18 @@ async function streamClaudeChat(
 }
 
 function mergeConsecutiveRoles(
-  messages: Array<{ role: "user" | "assistant"; content: any }>
+  messages: Array<{ role: "user" | "assistant"; content: any }>,
 ): Array<{ role: "user" | "assistant"; content: any }> {
   const merged: Array<{ role: "user" | "assistant"; content: any }> = [];
   for (const msg of messages) {
     const last = merged[merged.length - 1];
     if (last && last.role === msg.role) {
-      const lastContent = Array.isArray(last.content) ? last.content : [{ type: "text", text: last.content }];
-      const msgContent = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: msg.content }];
+      const lastContent = Array.isArray(last.content)
+        ? last.content
+        : [{ type: "text", text: last.content }];
+      const msgContent = Array.isArray(msg.content)
+        ? msg.content
+        : [{ type: "text", text: msg.content }];
       last.content = [...lastContent, ...msgContent];
     } else {
       merged.push({ ...msg });
@@ -423,14 +478,17 @@ async function streamChatComplete(
   const stream = await client.chat.completions.create({
     model,
     messages: messages as any,
-    tools: tools.length > 0 ? tools as any : undefined,
+    tools: tools.length > 0 ? (tools as any) : undefined,
     max_completion_tokens: maxTokens,
     stream: true,
     stream_options: { include_usage: true },
   });
 
   let text = "";
-  const toolCalls: Map<number, { id: string; name: string; arguments: string }> = new Map();
+  const toolCalls: Map<
+    number,
+    { id: string; name: string; arguments: string }
+  > = new Map();
   let finishReason = "stop";
   let usage = { inputTokens: 0, outputTokens: 0 };
 
@@ -455,7 +513,8 @@ async function streamChatComplete(
       for (const tc of delta.tool_calls) {
         const existing = toolCalls.get(tc.index);
         if (existing) {
-          if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+          if (tc.function?.arguments)
+            existing.arguments += tc.function.arguments;
         } else {
           toolCalls.set(tc.index, {
             id: tc.id || "",
@@ -483,8 +542,11 @@ export async function responsesApiCall(
   config: AngelConfig,
   input: string,
   builtInTools: Array<{ type: string }>,
-  opts?: { model?: string }
-): Promise<{ output: string; usage: { inputTokens: number; outputTokens: number } }> {
+  opts?: { model?: string },
+): Promise<{
+  output: string;
+  usage: { inputTokens: number; outputTokens: number };
+}> {
   const client = getOpenAIClient(config);
   const model = opts?.model || config.model;
 

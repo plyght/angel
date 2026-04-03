@@ -27,7 +27,11 @@ export interface ChannelAdapter {
   stop?(): Promise<void>;
   sendText(externalChatId: string, text: string): Promise<void>;
   sendTyping?(externalChatId: string): Promise<void>;
-  sendAttachment?(externalChatId: string, filePath: string, caption?: string): Promise<void>;
+  sendAttachment?(
+    externalChatId: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void>;
   maxMessageLength?: number;
 }
 
@@ -52,7 +56,9 @@ export class ChannelRegistry {
         await adapter.start(handler);
         console.log(`[angel] Channel started: ${adapter.name}`);
       } catch (err: any) {
-        console.error(`[angel] Failed to start channel ${adapter.name}: ${err.message}`);
+        console.error(
+          `[angel] Failed to start channel ${adapter.name}: ${err.message}`,
+        );
       }
     });
     await Promise.all(startPromises);

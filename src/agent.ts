@@ -1,12 +1,12 @@
 import type { Database } from "bun:sqlite";
-import type { AngelConfig } from "./config";
-import type { ToolRegistry, ToolContext } from "./tools/registry";
-import { chatComplete, type LlmMessage, type LlmTool } from "./llm";
-import { loadSession, saveSession, logUsage, storeMessage } from "./db";
-import { buildMemoryContext } from "./memory";
-import { runHook } from "./hooks";
-import { readFileSync, existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import type { AngelConfig } from "./config";
+import { loadSession, logUsage, saveSession, storeMessage } from "./db";
+import { runHook } from "./hooks";
+import { chatComplete, type LlmMessage } from "./llm";
+import { buildMemoryContext } from "./memory";
+import type { ToolContext, ToolRegistry } from "./tools/registry";
 
 export interface AgentOptions {
   chatId: number;
@@ -27,14 +27,25 @@ export interface AgentOptions {
 
 export const INTERRUPTED = Symbol("interrupted");
 
-export async function processMessage(userMessage: string, opts: AgentOptions, image?: { base64: string; mimeType: string }): Promise<string | typeof INTERRUPTED> {
+export async function processMessage(
+  userMessage: string,
+  opts: AgentOptions,
+  image?: { base64: string; mimeType: string },
+): Promise<string | typeof INTERRUPTED> {
   const { chatId, channel, db, config, registry } = opts;
   const senderDmId = opts.senderDmId;
 
   const sessionJson = loadSession(db, chatId);
   let messages: LlmMessage[] = sessionJson ? JSON.parse(sessionJson) : [];
 
-  let systemPrompt = buildSystemPrompt(config, chatId, channel, db, registry, senderDmId);
+  let systemPrompt = buildSystemPrompt(
+    config,
+    chatId,
+    channel,
+    db,
+    registry,
+    senderDmId,
+  );
 
   if (opts.isOnboarding) {
     systemPrompt += `\n\n<onboarding>
@@ -53,7 +64,10 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
     messages.push({
       role: "user",
       content: [
-        { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
+        {
+          type: "image_url",
+          image_url: { url: `data:${image.mimeType};base64,${image.base64}` },
+        },
         { type: "text", text: userMessage || "What's in this image?" },
       ] as any,
     });
@@ -67,7 +81,7 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
 
   const tools = registry.getDefinitions();
   let iterations = 0;
-  let loopFingerprints: string[] = [];
+  const loopFingerprints: string[] = [];
   let finalText = "";
 
   while (iterations < config.max_tool_iterations) {
@@ -93,7 +107,14 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
     });
     const durationMs = Date.now() - start;
 
-    logUsage(db, chatId, config.model, response.usage.inputTokens, response.usage.outputTokens, durationMs);
+    logUsage(
+      db,
+      chatId,
+      config.model,
+      response.usage.inputTokens,
+      response.usage.outputTokens,
+      durationMs,
+    );
 
     if (response.toolCalls.length === 0) {
       finalText = response.text;
@@ -104,7 +125,9 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
     const fp = toolCallFingerprint(response.toolCalls);
     loopFingerprints.push(fp);
     if (detectLoop(loopFingerprints, 4)) {
-      finalText = response.text || "I appear to be stuck in a loop. Let me stop and summarize what I've found.";
+      finalText =
+        response.text ||
+        "I appear to be stuck in a loop. Let me stop and summarize what I've found.";
       messages.push({ role: "assistant", content: finalText });
       break;
     }
@@ -139,7 +162,11 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
 
       opts.onToolStart?.(tc.name, tc.arguments);
 
-      const beforeTool = await runHook("before_tool", { name: tc.name, input: tc.arguments }, config);
+      const beforeTool = await runHook(
+        "before_tool",
+        { name: tc.name, input: tc.arguments },
+        config,
+      );
       if (beforeTool?.action === "block") {
         messages.push({
           role: "tool",
@@ -164,11 +191,19 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
       }
 
       const result = await registry.execute(tc.name, parsed, ctx);
-      if (tc.name === "send_message" && !result.isError && opts.usedSendMessage) {
+      if (
+        tc.name === "send_message" &&
+        !result.isError &&
+        opts.usedSendMessage
+      ) {
         opts.usedSendMessage.value = true;
       }
 
-      await runHook("after_tool", { name: tc.name, result: result.output }, config);
+      await runHook(
+        "after_tool",
+        { name: tc.name, result: result.output },
+        config,
+      );
 
       const output = result.output.slice(0, 50000);
       messages.push({
@@ -183,12 +218,16 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
   }
 
   if (iterations >= config.max_tool_iterations) {
-    finalText = finalText || "Reached maximum tool iterations. Here is what I have so far.";
+    finalText =
+      finalText ||
+      "Reached maximum tool iterations. Here is what I have so far.";
   }
 
   saveSession(db, chatId, JSON.stringify(messages));
 
-  storeMessage(db, chatId, "user", userMessage, { senderName: opts.senderName || "user" });
+  storeMessage(db, chatId, "user", userMessage, {
+    senderName: opts.senderName || "user",
+  });
   if (finalText) {
     storeMessage(db, chatId, "assistant", finalText, { isFromBot: true });
   }
@@ -196,14 +235,23 @@ Be warm and conversational, not like a form. Ask 2-3 questions at a time max. Us
   return finalText;
 }
 
-function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string, db: Database, registry: ToolRegistry, senderDmId?: string): string {
+function buildSystemPrompt(
+  config: AngelConfig,
+  chatId: number,
+  channel: string,
+  db: Database,
+  registry: ToolRegistry,
+  senderDmId?: string,
+): string {
   const parts: string[] = [];
 
   const soulPath = config.soul_md_path || join(config.data_dir, "SOUL.md");
   if (existsSync(soulPath)) {
     parts.push(readFileSync(soulPath, "utf-8"));
   } else {
-    parts.push("You are Angel, an autonomous AI assistant. You help users by using your available tools to accomplish tasks. Keep responses short and concise — a few sentences max unless the user asks for detail. No fluff, no filler, no unnecessary explanations. Be direct and conversational.");
+    parts.push(
+      "You are Angel, an autonomous AI assistant. You help users by using your available tools to accomplish tasks. Keep responses short and concise — a few sentences max unless the user asks for detail. No fluff, no filler, no unnecessary explanations. Be direct and conversational.",
+    );
   }
 
   const memoryContext = buildMemoryContext(db, chatId, config);
@@ -215,17 +263,28 @@ function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string,
   const now = new Date().toLocaleString("en-US", { timeZone: tz });
   parts.push(`\nCurrent time: ${now} (${tz})`);
   parts.push(`Channel: ${channel}`);
-  const chatRow = db.query("SELECT chat_type FROM chats WHERE id = ?").get(chatId) as any;
-  if (chatRow?.chat_type?.includes("group") || chatRow?.chat_type?.includes("guild")) {
-    parts.push("This is a GROUP chat. Messages are prefixed with [sender name]. Address people by name when relevant. You only receive messages where you were mentioned or addressed.");
+  const chatRow = db
+    .query("SELECT chat_type FROM chats WHERE id = ?")
+    .get(chatId) as any;
+  if (
+    chatRow?.chat_type?.includes("group") ||
+    chatRow?.chat_type?.includes("guild")
+  ) {
+    parts.push(
+      "This is a GROUP chat. Messages are prefixed with [sender name]. Address people by name when relevant. You only receive messages where you were mentioned or addressed.",
+    );
   }
   if (channel === "signal") {
-    parts.push("IMPORTANT: Do not use any markdown formatting (no *, **, #, `, ```, -, etc). Signal does not render markdown. Use plain text only.");
+    parts.push(
+      "IMPORTANT: Do not use any markdown formatting (no *, **, #, `, ```, -, etc). Signal does not render markdown. Use plain text only.",
+    );
   }
   parts.push(`Available tools: ${registry.listNames().join(", ")}`);
 
   if (config.safe_word) {
-    const isGroup = chatRow?.chat_type?.includes("group") || chatRow?.chat_type?.includes("guild");
+    const isGroup =
+      chatRow?.chat_type?.includes("group") ||
+      chatRow?.chat_type?.includes("guild");
     let safetyInstructions = `A safe word is configured. When you are about to perform a dangerous or irreversible action (deleting files, running risky commands, modifying production systems, etc.), you must verify the safe word BEFORE executing. Never reveal or hint at what the safe word is. Do not ask for the safe word on routine/low-risk operations.`;
     if (isGroup) {
       safetyInstructions += `\n\nIMPORTANT: This is a group chat. NEVER ask for the safe word here. Instead:
@@ -245,7 +304,11 @@ function buildSystemPrompt(config: AngelConfig, chatId: number, channel: string,
   return parts.join("\n\n");
 }
 
-function resolveWorkingDir(config: AngelConfig, chatId: number, channel: string): string {
+function resolveWorkingDir(
+  config: AngelConfig,
+  chatId: number,
+  channel: string,
+): string {
   if (config.working_dir_isolation === "per_chat") {
     const dir = join(config.working_dir, channel, String(chatId));
     const { mkdirSync, existsSync } = require("fs");
@@ -253,11 +316,15 @@ function resolveWorkingDir(config: AngelConfig, chatId: number, channel: string)
     return dir;
   }
   const { mkdirSync, existsSync } = require("fs");
-  if (!existsSync(config.working_dir)) mkdirSync(config.working_dir, { recursive: true });
+  if (!existsSync(config.working_dir))
+    mkdirSync(config.working_dir, { recursive: true });
   return config.working_dir;
 }
 
-async function compactMessages(messages: LlmMessage[], config: AngelConfig): Promise<LlmMessage[]> {
+async function compactMessages(
+  messages: LlmMessage[],
+  config: AngelConfig,
+): Promise<LlmMessage[]> {
   const keepRecent = config.compaction_keep_recent;
   if (messages.length <= keepRecent + 2) return messages;
 
@@ -265,15 +332,36 @@ async function compactMessages(messages: LlmMessage[], config: AngelConfig): Pro
   const recent = messages.slice(messages.length - keepRecent);
 
   const summaryPrompt: LlmMessage[] = [
-    { role: "system", content: "Summarize the following conversation concisely, preserving key facts, decisions, and context. Output only the summary." },
-    { role: "user", content: older.map((m) => `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 500) : "[tool data]"}`).join("\n") },
+    {
+      role: "system",
+      content:
+        "Summarize the following conversation concisely, preserving key facts, decisions, and context. Output only the summary.",
+    },
+    {
+      role: "user",
+      content: older
+        .map(
+          (m) =>
+            `${m.role}: ${typeof m.content === "string" ? m.content.slice(0, 500) : "[tool data]"}`,
+        )
+        .join("\n"),
+    },
   ];
 
   try {
-    const response = await chatComplete(config, summaryPrompt, [], { maxTokens: 1024 });
+    const response = await chatComplete(config, summaryPrompt, [], {
+      maxTokens: 1024,
+    });
     return [
-      { role: "user", content: `[Previous conversation summary]: ${response.text}` },
-      { role: "assistant", content: "Understood, I have the context from our previous conversation." },
+      {
+        role: "user",
+        content: `[Previous conversation summary]: ${response.text}`,
+      },
+      {
+        role: "assistant",
+        content:
+          "Understood, I have the context from our previous conversation.",
+      },
       ...recent,
     ];
   } catch {
@@ -281,7 +369,9 @@ async function compactMessages(messages: LlmMessage[], config: AngelConfig): Pro
   }
 }
 
-function toolCallFingerprint(toolCalls: Array<{ name: string; arguments: string }>): string {
+function toolCallFingerprint(
+  toolCalls: Array<{ name: string; arguments: string }>,
+): string {
   return toolCalls.map((tc) => `${tc.name}:${tc.arguments}`).join("|");
 }
 
@@ -289,7 +379,11 @@ function detectLoop(fingerprints: string[], threshold: number): boolean {
   if (fingerprints.length < threshold) return false;
   const last = fingerprints[fingerprints.length - 1];
   let count = 0;
-  for (let i = fingerprints.length - 1; i >= 0 && i >= fingerprints.length - threshold; i--) {
+  for (
+    let i = fingerprints.length - 1;
+    i >= 0 && i >= fingerprints.length - threshold;
+    i--
+  ) {
     if (fingerprints[i] === last) count++;
   }
   return count >= threshold;

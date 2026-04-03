@@ -1,4 +1,4 @@
-import type { ChannelAdapter, MessageHandler, IncomingMessage } from "./types";
+import type { ChannelAdapter, IncomingMessage, MessageHandler } from "./types";
 
 export class SlackChannel implements ChannelAdapter {
   name = "slack";
@@ -7,7 +7,6 @@ export class SlackChannel implements ChannelAdapter {
   private app: any = null;
   private botToken: string;
   private appToken: string;
-  private botUserId: string = "";
 
   constructor(botToken: string, appToken: string) {
     this.botToken = botToken;
@@ -29,7 +28,7 @@ export class SlackChannel implements ChannelAdapter {
 
     this.app.event("app_mention", async ({ event }: any) => {
       if (!this.handler) return;
-      let text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
+      const text = event.text.replace(/<@[A-Z0-9]+>/g, "").trim();
       if (!text) return;
 
       const incoming: IncomingMessage = {
@@ -41,7 +40,7 @@ export class SlackChannel implements ChannelAdapter {
       };
 
       this.handler(incoming).catch((err) =>
-        console.error(`[angel] Slack handler error: ${err.message}`)
+        console.error(`[angel] Slack handler error: ${err.message}`),
       );
     });
 
@@ -58,7 +57,7 @@ export class SlackChannel implements ChannelAdapter {
       };
 
       this.handler(incoming).catch((err) =>
-        console.error(`[angel] Slack handler error: ${err.message}`)
+        console.error(`[angel] Slack handler error: ${err.message}`),
       );
     });
 
@@ -83,5 +82,5 @@ export class SlackChannel implements ChannelAdapter {
     }
   }
 
-  async sendTyping(externalChatId: string) {}
+  async sendTyping(_externalChatId: string) {}
 }

@@ -1,25 +1,31 @@
 import type { Tool, ToolContext, ToolResult } from "./registry";
 
 const BLOCKED_HARD: [RegExp, string][] = [
-  [/rm\s+(-rf?|--recursive)\s+[\/~]/, "recursive rm on root/home"],
+  [/rm\s+(-rf?|--recursive)\s+[/~]/, "recursive rm on root/home"],
   [/rm\s+(-rf?|--recursive)\s+\.\.\/?/, "recursive rm on parent directory"],
   [/>\s*\/dev\/sd/, "write to block device"],
   [/mkfs\./, "format filesystem"],
   [/dd\s+if=/, "raw disk write"],
-  [/chmod\s+(-R\s+)?[0-7]*777\s+[\/~]/, "chmod 777 on root/home"],
-  [/chown\s+-R\s+.*\s+[\/~]/, "recursive chown on root/home"],
+  [/chmod\s+(-R\s+)?[0-7]*777\s+[/~]/, "chmod 777 on root/home"],
+  [/chown\s+-R\s+.*\s+[/~]/, "recursive chown on root/home"],
   [/:\(\)\{\s*:\|:&\s*\};:/, "fork bomb"],
   [/>\s*\/etc\//, "overwrite system config"],
   [/>\s*\/System\//, "overwrite macOS system files"],
   [/launchctl\s+unload/, "unload system services"],
-  [/systemctl\s+(stop|disable|mask)\s+(sshd|firewalld|ufw)/, "disable security services"],
+  [
+    /systemctl\s+(stop|disable|mask)\s+(sshd|firewalld|ufw)/,
+    "disable security services",
+  ],
   [/iptables\s+-F/, "flush firewall rules"],
   [/pfctl\s+-d/, "disable macOS firewall"],
   [/sudo\s+visudo/, "edit sudoers"],
   [/passwd/, "change passwords"],
   [/security\s+(delete|remove)-keychain/, "delete keychain"],
   [/security\s+dump-keychain/, "dump keychain"],
-  [/security\s+find-(generic|internet)-password\s.*-w/, "extract keychain passwords"],
+  [
+    /security\s+find-(generic|internet)-password\s.*-w/,
+    "extract keychain passwords",
+  ],
   [/cat\s+.*angel\.config/, "read angel config"],
   [/cat\s+.*\/\.env/, "read env file"],
   [/cat\s+.*id_rsa/, "read SSH private key"],
@@ -28,7 +34,10 @@ const BLOCKED_HARD: [RegExp, string][] = [
   [/printenv|env\s*$|env\s*\|/, "dump all environment variables"],
   [/set\s*$|set\s*\|/, "dump shell variables"],
   [/export\s+-p\s*\|/, "dump exported variables"],
-  [/curl\s+.*(-d|--data|--data-binary|--upload-file)\s/, "curl with outbound data"],
+  [
+    /curl\s+.*(-d|--data|--data-binary|--upload-file)\s/,
+    "curl with outbound data",
+  ],
   [/curl\s+.*-X\s*(POST|PUT|PATCH)\s/, "curl with write method"],
   [/wget\s+.*--post/, "wget with POST data"],
   [/nc\s+-/, "netcat"],
@@ -43,7 +52,10 @@ const BLOCKED_HARD: [RegExp, string][] = [
   [/\|\s*(curl|wget|nc|ssh)/, "pipe to network tool"],
   [/open\s+.*https?:/, "open URL in browser"],
   [/osascript/, "run AppleScript"],
-  [/pkill\s+-9\s+(Finder|loginwindow|SystemUIServer|WindowServer)/, "kill critical macOS processes"],
+  [
+    /pkill\s+-9\s+(Finder|loginwindow|SystemUIServer|WindowServer)/,
+    "kill critical macOS processes",
+  ],
   [/kill\s+-9\s+1\b/, "kill init/launchd"],
   [/diskutil\s+(erase|partition|unmount)/, "disk operations"],
   [/hdiutil\s+(eject|detach)/, "disk image operations"],
@@ -73,7 +85,8 @@ function scrubSecrets(output: string): string {
 
 export const bashTool: Tool = {
   name: "bash",
-  description: "Execute a shell command. Returns stdout and stderr. Use for system operations, running scripts, git commands, etc. Some dangerous commands are blocked for safety. Secrets in output are automatically redacted.",
+  description:
+    "Execute a shell command. Returns stdout and stderr. Use for system operations, running scripts, git commands, etc. Some dangerous commands are blocked for safety. Secrets in output are automatically redacted.",
   parameters: {
     type: "object",
     properties: {
@@ -90,7 +103,10 @@ export const bashTool: Tool = {
   },
   risk: "high",
 
-  async execute(input: { command: string; timeout_ms?: number }, ctx: ToolContext): Promise<ToolResult> {
+  async execute(
+    input: { command: string; timeout_ms?: number },
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
     const timeout = Math.min(input.timeout_ms || 30000, 300000);
 
     for (const [pattern, reason] of BLOCKED_HARD) {

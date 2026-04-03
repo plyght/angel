@@ -1,6 +1,6 @@
-import type { AngelConfig } from "./config";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import type { AngelConfig } from "./config";
 
 export interface HookOutcome {
   action: "allow" | "block" | "modify";
@@ -50,7 +50,7 @@ function loadHooks(config: AngelConfig): HookDef[] {
 export async function runHook(
   event: string,
   data: any,
-  config: AngelConfig
+  config: AngelConfig,
 ): Promise<HookOutcome | null> {
   const hooks = loadHooks(config).filter((h) => h.event === event && h.enabled);
   if (hooks.length === 0) return null;
@@ -64,7 +64,9 @@ export async function runHook(
       });
 
       const writer = proc.stdin.getWriter();
-      await writer.write(new TextEncoder().encode(JSON.stringify({ event, data })));
+      await writer.write(
+        new TextEncoder().encode(JSON.stringify({ event, data })),
+      );
       await writer.close();
 
       const timer = setTimeout(() => proc.kill(), hook.timeout_ms);

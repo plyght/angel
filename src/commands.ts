@@ -8,7 +8,12 @@ export interface CommandResult {
   action?: "restart";
 }
 
-export function handleCommand(text: string, chatId: number, db: Database, config: AngelConfig): CommandResult {
+export function handleCommand(
+  text: string,
+  chatId: number,
+  db: Database,
+  config: AngelConfig,
+): CommandResult {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/")) return { text: "", handled: false };
 
@@ -32,41 +37,55 @@ export function handleCommand(text: string, chatId: number, db: Database, config
 /version — Show version`,
       };
 
-    case "/model":
+    case "/model": {
       if (arg) {
         db.run(
           "INSERT INTO sessions (chat_id, model_override, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(chat_id) DO UPDATE SET model_override = excluded.model_override",
-          [chatId, arg]
+          [chatId, arg],
         );
         return { handled: true, text: `Model set to: ${arg}` };
       }
-      const session = db.query("SELECT model_override FROM sessions WHERE chat_id = ?").get(chatId) as any;
-      return { handled: true, text: `Current model: ${session?.model_override || config.model}` };
-
-    case "/memory":
-      const memories = getMemories(db, chatId, 20);
-      if (memories.length === 0) return { handled: true, text: "No memories stored." };
+      const session = db
+        .query("SELECT model_override FROM sessions WHERE chat_id = ?")
+        .get(chatId) as any;
       return {
         handled: true,
-        text: memories.map((m: any) => `#${m.id} [${m.category}] ${m.content}`).join("\n"),
+        text: `Current model: ${session?.model_override || config.model}`,
       };
+    }
 
-    case "/usage":
+    case "/memory": {
+      const memories = getMemories(db, chatId, 20);
+      if (memories.length === 0)
+        return { handled: true, text: "No memories stored." };
+      return {
+        handled: true,
+        text: memories
+          .map((m: any) => `#${m.id} [${m.category}] ${m.content}`)
+          .join("\n"),
+      };
+    }
+
+    case "/usage": {
       const stats = getUsageStats(db);
       if (stats.length === 0) return { handled: true, text: "No usage data." };
       return {
         handled: true,
-        text: stats.map((s: any) =>
-          `${s.model}: ${s.calls} calls, ${s.total_input} input tokens, ${s.total_output} output tokens`
-        ).join("\n"),
+        text: stats
+          .map(
+            (s: any) =>
+              `${s.model}: ${s.calls} calls, ${s.total_input} input tokens, ${s.total_output} output tokens`,
+          )
+          .join("\n"),
       };
+    }
 
     case "/new":
       db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
       db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
       return { handled: true, text: "New chat started." };
 
-    case "/settings":
+    case "/settings": {
       const enabledChannels = Object.entries(config.channels)
         .filter(([_, v]: [string, any]) => v?.enabled !== false)
         .map(([k]) => k);
@@ -79,17 +98,23 @@ History messages: ${config.max_history_messages}
 Timezone: ${config.timezone}
 Channels: ${enabledChannels.join(", ")}`,
       };
+    }
 
     case "/clear":
       db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
       return { handled: true, text: "Session cleared." };
 
     case "/reset":
-      db.run("DELETE FROM db_meta WHERE key IN ('onboarded', 'onboarding_chat')");
+      db.run(
+        "DELETE FROM db_meta WHERE key IN ('onboarded', 'onboarding_chat')",
+      );
       db.run("DELETE FROM memories WHERE category = 'profile'");
       db.run("DELETE FROM sessions WHERE chat_id = ?", [chatId]);
       db.run("DELETE FROM messages WHERE chat_id = ?", [chatId]);
-      return { handled: true, text: "Onboarding reset! Send me a message to start fresh." };
+      return {
+        handled: true,
+        text: "Onboarding reset! Send me a message to start fresh.",
+      };
 
     case "/restart":
       return { handled: true, text: "Restarting...", action: "restart" };

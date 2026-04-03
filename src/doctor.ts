@@ -1,8 +1,8 @@
 import * as p from "@clack/prompts";
-import color from "picocolors";
 import { existsSync } from "fs";
-import { join } from "path";
 import { homedir } from "os";
+import { join } from "path";
+import color from "picocolors";
 import { configExists, configPath, loadConfig } from "./config";
 
 export async function runDoctor(): Promise<void> {
@@ -70,12 +70,18 @@ export async function runDoctor(): Promise<void> {
       const proc = Bun.spawn(["which", cliPath], { stdout: "pipe" });
       const path = (await new Response(proc.stdout).text()).trim();
       if (path) {
-        const ver = Bun.spawn([cliPath, "--version"], { stdout: "pipe", stderr: "pipe" });
+        const ver = Bun.spawn([cliPath, "--version"], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
         const version = (await new Response(ver.stdout).text()).trim();
         p.log.success(`Signal CLI: ${version || "found"} at ${path}`);
 
         try {
-          const acc = Bun.spawn([cliPath, "listAccounts"], { stdout: "pipe", stderr: "pipe" });
+          const acc = Bun.spawn([cliPath, "listAccounts"], {
+            stdout: "pipe",
+            stderr: "pipe",
+          });
           const accounts = (await new Response(acc.stdout).text()).trim();
           if (accounts) {
             const count = accounts.split("\n").filter(Boolean).length;

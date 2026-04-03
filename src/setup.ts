@@ -1,17 +1,29 @@
 import * as p from "@clack/prompts";
-import color from "picocolors";
-import { saveConfig, configPath, configExists, loadConfig, type AngelConfig, DEFAULTS } from "./config";
 import { existsSync, mkdirSync } from "fs";
-import { dirname, join } from "path";
 import { homedir } from "os";
+import { dirname, join } from "path";
+import color from "picocolors";
+import {
+  type AngelConfig,
+  configExists,
+  configPath,
+  DEFAULTS,
+  loadConfig,
+  saveConfig,
+} from "./config";
 
-async function checkSignalCli(cliPath = "signal-cli"): Promise<{ installed: boolean; path: string; version: string }> {
+async function checkSignalCli(
+  cliPath = "signal-cli",
+): Promise<{ installed: boolean; path: string; version: string }> {
   try {
     const which = Bun.spawn(["which", cliPath], { stdout: "pipe" });
     const whichPath = (await new Response(which.stdout).text()).trim();
     if (!whichPath) return { installed: false, path: "", version: "" };
 
-    const ver = Bun.spawn([cliPath, "--version"], { stdout: "pipe", stderr: "pipe" });
+    const ver = Bun.spawn([cliPath, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const version = (await new Response(ver.stdout).text()).trim();
     return { installed: true, path: whichPath, version };
   } catch {
@@ -21,10 +33,16 @@ async function checkSignalCli(cliPath = "signal-cli"): Promise<{ installed: bool
 
 async function checkSignalAccount(cliPath = "signal-cli"): Promise<string[]> {
   try {
-    const proc = Bun.spawn([cliPath, "listAccounts"], { stdout: "pipe", stderr: "pipe" });
+    const proc = Bun.spawn([cliPath, "listAccounts"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const output = (await new Response(proc.stdout).text()).trim();
     if (!output) return [];
-    return output.split("\n").map((l) => l.trim()).filter(Boolean);
+    return output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -43,50 +61,78 @@ export async function runSetup(): Promise<void> {
       if (!v?.trim()) return "API key is required";
     },
   });
-  if (p.isCancel(openaiKey)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(openaiKey)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const model = await p.text({
     message: "Default model",
     initialValue: existing?.model || DEFAULTS.model,
   });
-  if (p.isCancel(model)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(model)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const maxTokens = await p.text({
     message: "Max output tokens per response",
     initialValue: String(existing?.max_tokens || DEFAULTS.max_tokens),
     validate: (v) => {
-      if (!v || isNaN(Number(v)) || Number(v) < 1) return "Must be a positive number";
+      if (!v || Number.isNaN(Number(v)) || Number(v) < 1)
+        return "Must be a positive number";
     },
   });
-  if (p.isCancel(maxTokens)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(maxTokens)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const timezone = await p.text({
     message: "Timezone (IANA)",
     initialValue: existing?.timezone || DEFAULTS.timezone,
   });
-  if (p.isCancel(timezone)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(timezone)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const workingDirIsolation = await p.select({
     message: "Working directory isolation",
-    initialValue: existing?.working_dir_isolation || DEFAULTS.working_dir_isolation,
+    initialValue:
+      existing?.working_dir_isolation || DEFAULTS.working_dir_isolation,
     options: [
-      { value: "per_chat", label: "Per chat", hint: "each chat gets its own working directory" },
+      {
+        value: "per_chat",
+        label: "Per chat",
+        hint: "each chat gets its own working directory",
+      },
       { value: "none", label: "None", hint: "shared working directory" },
     ],
   });
-  if (p.isCancel(workingDirIsolation)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(workingDirIsolation)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const selectedChannels = await p.multiselect({
     message: "Which channels do you want to enable?",
     options: [
       { value: "discord", label: "Discord", hint: "requires bot token" },
       { value: "slack", label: "Slack", hint: "requires bot + app tokens" },
-      { value: "imessage", label: "iMessage", hint: "macOS only, needs Full Disk Access" },
+      {
+        value: "imessage",
+        label: "iMessage",
+        hint: "macOS only, needs Full Disk Access",
+      },
       { value: "signal", label: "Signal", hint: "requires signal-cli" },
     ],
     required: false,
   });
-  if (p.isCancel(selectedChannels)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(selectedChannels)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const channels: AngelConfig["channels"] = {};
 
@@ -95,17 +141,29 @@ export async function runSetup(): Promise<void> {
       message: "Discord bot token",
       placeholder: "paste your bot token",
       initialValue: existing?.channels?.discord?.token || "",
-      validate: (v) => { if (!v?.trim()) return "Token is required for Discord"; },
+      validate: (v) => {
+        if (!v?.trim()) return "Token is required for Discord";
+      },
     });
-    if (p.isCancel(token)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(token)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
     const botUsername = await p.text({
       message: "Discord bot username (for mention detection)",
       initialValue: existing?.channels?.discord?.bot_username || "angel",
     });
-    if (p.isCancel(botUsername)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(botUsername)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
-    channels.discord = { enabled: true, token: token as string, bot_username: botUsername as string };
+    channels.discord = {
+      enabled: true,
+      token: token as string,
+      bot_username: botUsername as string,
+    };
   }
 
   if (selectedChannels.includes("slack")) {
@@ -113,25 +171,41 @@ export async function runSetup(): Promise<void> {
       message: "Slack bot token",
       placeholder: "xoxb-...",
       initialValue: existing?.channels?.slack?.bot_token || "",
-      validate: (v) => { if (!v?.trim()) return "Bot token is required for Slack"; },
+      validate: (v) => {
+        if (!v?.trim()) return "Bot token is required for Slack";
+      },
     });
-    if (p.isCancel(botToken)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(botToken)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
     const appToken = await p.text({
       message: "Slack app token (for Socket Mode)",
       placeholder: "xapp-...",
       initialValue: existing?.channels?.slack?.app_token || "",
-      validate: (v) => { if (!v?.trim()) return "App token is required for Slack Socket Mode"; },
+      validate: (v) => {
+        if (!v?.trim()) return "App token is required for Slack Socket Mode";
+      },
     });
-    if (p.isCancel(appToken)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(appToken)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
-    channels.slack = { enabled: true, bot_token: botToken as string, app_token: appToken as string };
+    channels.slack = {
+      enabled: true,
+      bot_token: botToken as string,
+      app_token: appToken as string,
+    };
   }
 
   if (selectedChannels.includes("imessage")) {
     const msgDb = join(homedir(), "Library", "Messages", "chat.db");
     if (!existsSync(msgDb)) {
-      p.log.warn("Messages database not found. You need to grant Full Disk Access to your terminal in System Settings → Privacy & Security → Full Disk Access.");
+      p.log.warn(
+        "Messages database not found. You need to grant Full Disk Access to your terminal in System Settings → Privacy & Security → Full Disk Access.",
+      );
     } else {
       p.log.success("Messages database found.");
     }
@@ -144,7 +218,10 @@ export async function runSetup(): Promise<void> {
         { value: "SMS", label: "SMS" },
       ],
     });
-    if (p.isCancel(service)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(service)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
     channels.imessage = { enabled: true, service: service as string };
   }
@@ -158,19 +235,37 @@ export async function runSetup(): Promise<void> {
       const installChoice = await p.select({
         message: "How would you like to proceed?",
         options: [
-          { value: "brew", label: "Install via Homebrew", hint: "brew install signal-cli" },
-          { value: "manual", label: "I'll install it myself", hint: "https://github.com/AsamK/signal-cli" },
-          { value: "path", label: "Specify custom path", hint: "if installed elsewhere" },
+          {
+            value: "brew",
+            label: "Install via Homebrew",
+            hint: "brew install signal-cli",
+          },
+          {
+            value: "manual",
+            label: "I'll install it myself",
+            hint: "https://github.com/AsamK/signal-cli",
+          },
+          {
+            value: "path",
+            label: "Specify custom path",
+            hint: "if installed elsewhere",
+          },
           { value: "skip", label: "Skip Signal for now" },
         ],
       });
-      if (p.isCancel(installChoice)) { p.cancel("Setup cancelled."); process.exit(0); }
+      if (p.isCancel(installChoice)) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
 
       if (installChoice === "brew") {
         const s = p.spinner();
         s.start("Installing signal-cli via Homebrew...");
         try {
-          const proc = Bun.spawn(["brew", "install", "signal-cli"], { stdout: "pipe", stderr: "pipe" });
+          const proc = Bun.spawn(["brew", "install", "signal-cli"], {
+            stdout: "pipe",
+            stderr: "pipe",
+          });
           await proc.exited;
           const exitCode = proc.exitCode;
           if (exitCode === 0) {
@@ -193,7 +288,10 @@ export async function runSetup(): Promise<void> {
             if (!existsSync(v!.trim())) return "File not found at that path";
           },
         });
-        if (p.isCancel(customPath)) { p.cancel("Setup cancelled."); process.exit(0); }
+        if (p.isCancel(customPath)) {
+          p.cancel("Setup cancelled.");
+          process.exit(0);
+        }
 
         const recheck = await checkSignalCli(customPath as string);
         if (recheck.installed) {
@@ -206,19 +304,30 @@ export async function runSetup(): Promise<void> {
       if (installChoice === "skip") {
         // don't configure signal
       } else {
-        await configureSignalAccount(channels, existing, installChoice === "path" ? undefined : undefined);
+        await configureSignalAccount(
+          channels,
+          existing,
+          installChoice === "path" ? undefined : undefined,
+        );
       }
     } else {
-      p.log.success(`signal-cli ${signalInfo.version} found at ${signalInfo.path}`);
+      p.log.success(
+        `signal-cli ${signalInfo.version} found at ${signalInfo.path}`,
+      );
       await configureSignalAccount(channels, existing);
     }
   }
 
   const memReflector = await p.confirm({
-    message: "Enable memory reflector? (auto-synthesizes insights from conversations)",
-    initialValue: existing?.memory?.reflector_enabled ?? DEFAULTS.memory.reflector_enabled,
+    message:
+      "Enable memory reflector? (auto-synthesizes insights from conversations)",
+    initialValue:
+      existing?.memory?.reflector_enabled ?? DEFAULTS.memory.reflector_enabled,
   });
-  if (p.isCancel(memReflector)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(memReflector)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   const config: Partial<AngelConfig> = {
     ...DEFAULTS,
@@ -239,7 +348,9 @@ export async function runSetup(): Promise<void> {
 
   saveConfig(config);
 
-  p.outro(`Config saved to ${configPath()}. Run ${color.cyan("bun run start")} to launch Angel.`);
+  p.outro(
+    `Config saved to ${configPath()}. Run ${color.cyan("bun run start")} to launch Angel.`,
+  );
 }
 
 async function configureSignalAccount(
@@ -261,7 +372,10 @@ async function configureSignalAccount(
         { value: "__manual__", label: "Enter phone number manually" },
       ],
     });
-    if (p.isCancel(choice)) { p.cancel("Setup cancelled."); process.exit(0); }
+    if (p.isCancel(choice)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
 
     if (choice === "__new__") {
       p.log.info("To register a new account, run:");
@@ -271,14 +385,18 @@ async function configureSignalAccount(
       account = await p.text({
         message: "Phone number for the new account",
         placeholder: "+1234567890",
-        validate: (v) => { if (!v?.startsWith("+")) return "Must start with +"; },
+        validate: (v) => {
+          if (!v?.startsWith("+")) return "Must start with +";
+        },
       });
     } else if (choice === "__manual__") {
       account = await p.text({
         message: "Signal phone number",
         placeholder: "+1234567890",
         initialValue: existing?.channels?.signal?.account || "",
-        validate: (v) => { if (!v?.startsWith("+")) return "Must start with +"; },
+        validate: (v) => {
+          if (!v?.startsWith("+")) return "Must start with +";
+        },
       });
     } else {
       account = choice;
@@ -292,10 +410,15 @@ async function configureSignalAccount(
       message: "Signal phone number",
       placeholder: "+1234567890",
       initialValue: existing?.channels?.signal?.account || "",
-      validate: (v) => { if (!v?.startsWith("+")) return "Must start with +"; },
+      validate: (v) => {
+        if (!v?.startsWith("+")) return "Must start with +";
+      },
     });
   }
-  if (p.isCancel(account)) { p.cancel("Setup cancelled."); process.exit(0); }
+  if (p.isCancel(account)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
 
   channels.signal = {
     enabled: true,

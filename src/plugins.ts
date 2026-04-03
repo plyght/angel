@@ -1,7 +1,7 @@
-import type { AngelConfig } from "./config";
-import type { Tool, ToolContext, ToolResult } from "./tools/registry";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import type { AngelConfig } from "./config";
+import type { Tool, ToolContext, ToolResult } from "./tools/registry";
 
 interface PluginManifest {
   name: string;
@@ -31,7 +31,9 @@ export function loadPlugins(config: AngelConfig): Tool[] {
     if (!existsSync(manifestPath)) continue;
 
     try {
-      const manifest: PluginManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+      const manifest: PluginManifest = JSON.parse(
+        readFileSync(manifestPath, "utf-8"),
+      );
 
       for (const toolDef of manifest.tools || []) {
         tools.push({
@@ -50,13 +52,18 @@ export function loadPlugins(config: AngelConfig): Tool[] {
               });
 
               const writer = proc.stdin.getWriter();
-              await writer.write(new TextEncoder().encode(JSON.stringify(input)));
+              await writer.write(
+                new TextEncoder().encode(JSON.stringify(input)),
+              );
               await writer.close();
 
               const stdout = await new Response(proc.stdout).text();
               const exitCode = await proc.exited;
 
-              return { output: stdout || `(exit: ${exitCode})`, isError: exitCode !== 0 };
+              return {
+                output: stdout || `(exit: ${exitCode})`,
+                isError: exitCode !== 0,
+              };
             } catch (err: any) {
               return { output: `Plugin error: ${err.message}`, isError: true };
             }
@@ -64,7 +71,9 @@ export function loadPlugins(config: AngelConfig): Tool[] {
         });
       }
 
-      console.log(`[angel] Plugin loaded: ${manifest.name} (${manifest.tools?.length || 0} tools)`);
+      console.log(
+        `[angel] Plugin loaded: ${manifest.name} (${manifest.tools?.length || 0} tools)`,
+      );
     } catch (err: any) {
       console.error(`[angel] Plugin ${entry} failed: ${err.message}`);
     }

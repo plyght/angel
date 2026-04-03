@@ -1,10 +1,13 @@
-import type { Tool, ToolContext, ToolResult } from "./registry";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
+import type { Tool, ToolContext, ToolResult } from "./registry";
 
 interface AgentDef {
   command: string;
-  buildArgs: (prompt: string, opts: { workingDir: string; model?: string }) => string[];
+  buildArgs: (
+    prompt: string,
+    opts: { workingDir: string; model?: string },
+  ) => string[];
   detect: () => Promise<string | null>;
   installHint: string;
   supportsStreaming?: boolean;
@@ -14,7 +17,14 @@ const AGENTS: Record<string, AgentDef> = {
   claude: {
     command: "claude",
     buildArgs: (prompt, opts) => {
-      const args = ["-p", "--output-format", "stream-json", "--max-turns", "50", "--dangerously-skip-permissions"];
+      const args = [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--max-turns",
+        "50",
+        "--dangerously-skip-permissions",
+      ];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
       return args;
@@ -26,7 +36,14 @@ const AGENTS: Record<string, AgentDef> = {
   rose: {
     command: "rose",
     buildArgs: (prompt, opts) => {
-      const args = ["-p", "--output-format", "stream-json", "--max-turns", "50", "--dangerously-skip-permissions"];
+      const args = [
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--max-turns",
+        "50",
+        "--dangerously-skip-permissions",
+      ];
       if (opts.model) args.push("--model", opts.model);
       args.push(prompt);
       return args;
@@ -49,7 +66,13 @@ const AGENTS: Record<string, AgentDef> = {
   aider: {
     command: "aider",
     buildArgs: (prompt, opts) => {
-      const args = ["--yes", "--no-auto-commits", "--no-pretty", "--message", prompt];
+      const args = [
+        "--yes",
+        "--no-auto-commits",
+        "--no-pretty",
+        "--message",
+        prompt,
+      ];
       if (opts.model) args.push("--model", opts.model);
       return args;
     },
@@ -80,7 +103,10 @@ async function which(cmd: string): Promise<string | null> {
     const proc = Bun.spawn(["which", cmd], { stdout: "pipe", stderr: "pipe" });
     const out = (await new Response(proc.stdout).text()).trim();
     if (!out) return null;
-    const check = Bun.spawn([out, "--version"], { stdout: "pipe", stderr: "pipe" });
+    const check = Bun.spawn([out, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     await check.exited;
     if (check.exitCode !== 0) return null;
     return out;
@@ -116,26 +142,37 @@ export interface RunningAgent {
 const runningAgents: Map<number, RunningAgent> = new Map();
 let nextId = 1;
 
-let notifyFn: ((agent: RunningAgent, message: string) => Promise<void>) | null = null;
-let progressFn: ((agent: RunningAgent, message: string) => Promise<void>) | null = null;
+let notifyFn: ((agent: RunningAgent, message: string) => Promise<void>) | null =
+  null;
+let progressFn:
+  | ((agent: RunningAgent, message: string) => Promise<void>)
+  | null = null;
 
-export function setCodingAgentNotifier(fn: (agent: RunningAgent, message: string) => Promise<void>) {
+export function setCodingAgentNotifier(
+  fn: (agent: RunningAgent, message: string) => Promise<void>,
+) {
   notifyFn = fn;
 }
 
-export function setCodingAgentProgressNotifier(fn: (agent: RunningAgent, message: string) => Promise<void>) {
+export function setCodingAgentProgressNotifier(
+  fn: (agent: RunningAgent, message: string) => Promise<void>,
+) {
   progressFn = fn;
 }
 
 async function notify(agent: RunningAgent, message: string) {
   if (notifyFn) {
-    try { await notifyFn(agent, message); } catch {}
+    try {
+      await notifyFn(agent, message);
+    } catch {}
   }
 }
 
 async function notifyProgress(agent: RunningAgent, message: string) {
   if (progressFn) {
-    try { await progressFn(agent, message); } catch {}
+    try {
+      await progressFn(agent, message);
+    } catch {}
   }
 }
 
@@ -156,7 +193,8 @@ export const spawnCodingAgentTool: Tool = {
       },
       working_dir: {
         type: "string",
-        description: "Directory to run the agent in (defaults to current working dir)",
+        description:
+          "Directory to run the agent in (defaults to current working dir)",
       },
       model: {
         type: "string",
@@ -167,10 +205,21 @@ export const spawnCodingAgentTool: Tool = {
   },
   risk: "high",
 
-  async execute(input: { agent: string; prompt: string; working_dir?: string; model?: string }, ctx: ToolContext): Promise<ToolResult> {
+  async execute(
+    input: {
+      agent: string;
+      prompt: string;
+      working_dir?: string;
+      model?: string;
+    },
+    ctx: ToolContext,
+  ): Promise<ToolResult> {
     const def = AGENTS[input.agent];
     if (!def) {
-      return { output: `Unknown agent: ${input.agent}. Available: ${Object.keys(AGENTS).join(", ")}`, isError: true };
+      return {
+        output: `Unknown agent: ${input.agent}. Available: ${Object.keys(AGENTS).join(", ")}`,
+        isError: true,
+      };
     }
 
     const resolvedPath = await def.detect();
@@ -183,9 +232,14 @@ export const spawnCodingAgentTool: Tool = {
 
     let cwd = input.working_dir || ctx.workingDir;
     if (cwd.startsWith("~")) cwd = cwd.replace("~", process.env.HOME || "");
-    const args = def.buildArgs(input.prompt, { workingDir: cwd, model: input.model });
+    const args = def.buildArgs(input.prompt, {
+      workingDir: cwd,
+      model: input.model,
+    });
 
-    const chatRow = ctx.db?.query("SELECT external_chat_id FROM chats WHERE id = ?").get(ctx.chatId) as any;
+    const chatRow = ctx.db
+      ?.query("SELECT external_chat_id FROM chats WHERE id = ?")
+      .get(ctx.chatId) as any;
     const externalChatId = chatRow?.external_chat_id || "";
 
     const id = nextId++;
@@ -245,13 +299,22 @@ export const spawnCodingAgentTool: Tool = {
 
                   // Send progress notification if enough time has passed
                   const now = Date.now();
-                  if (entry.currentTool && now - lastProgressTime > PROGRESS_THROTTLE_MS) {
+                  if (
+                    entry.currentTool &&
+                    now - lastProgressTime > PROGRESS_THROTTLE_MS
+                  ) {
                     lastProgressTime = now;
-                    const elapsed = formatDuration(now - entry.startedAt.getTime());
-                    const toolList = entry.toolsUsed.length > 0
-                      ? `Tools: ${[...new Set(entry.toolsUsed)].slice(-5).join(", ")}`
-                      : "";
-                    notifyProgress(entry, `[${elapsed}] Using ${entry.currentTool}... (turn ${entry.turnCount})${toolList ? "\n" + toolList : ""}`);
+                    const elapsed = formatDuration(
+                      now - entry.startedAt.getTime(),
+                    );
+                    const toolList =
+                      entry.toolsUsed.length > 0
+                        ? `Tools: ${[...new Set(entry.toolsUsed)].slice(-5).join(", ")}`
+                        : "";
+                    notifyProgress(
+                      entry,
+                      `[${elapsed}] Using ${entry.currentTool}... (turn ${entry.turnCount})${toolList ? "\n" + toolList : ""}`,
+                    );
                   }
                 } catch {
                   // Not valid JSON, ignore
@@ -260,7 +323,9 @@ export const spawnCodingAgentTool: Tool = {
             }
             // Process any remaining buffer
             if (buffer.trim()) {
-              entry.stdout = entry.stdout.endsWith("\n") ? entry.stdout + buffer : entry.stdout;
+              entry.stdout = entry.stdout.endsWith("\n")
+                ? entry.stdout + buffer
+                : entry.stdout;
             }
           } catch {}
         })();
@@ -297,16 +362,27 @@ export const spawnCodingAgentTool: Tool = {
           entry.exitCode = proc.exitCode;
           entry.finishedAt = new Date();
           entry.currentTool = undefined;
-          const duration = formatDuration(entry.finishedAt.getTime() - entry.startedAt.getTime());
+          const duration = formatDuration(
+            entry.finishedAt.getTime() - entry.startedAt.getTime(),
+          );
 
           if (proc.exitCode === 0) {
             entry.status = "completed";
             const summary = extractSummary(entry, entry.stdout.trim());
-            notify(entry, `Done — ${entry.agent} finished in ${duration}.\n\n${summary || "No output."}`);
+            notify(
+              entry,
+              `Done — ${entry.agent} finished in ${duration}.\n\n${summary || "No output."}`,
+            );
           } else {
             entry.status = "failed";
-            const errOutput = extractSummary(entry, (entry.stderr || entry.stdout).trim());
-            notify(entry, `${entry.agent} failed (exit ${proc.exitCode}, ${duration}).\n\n${errOutput || "No output."}`);
+            const errOutput = extractSummary(
+              entry,
+              (entry.stderr || entry.stdout).trim(),
+            );
+            notify(
+              entry,
+              `${entry.agent} failed (exit ${proc.exitCode}, ${duration}).\n\n${errOutput || "No output."}`,
+            );
           }
         } catch (err: any) {
           entry.status = "failed";
@@ -314,12 +390,14 @@ export const spawnCodingAgentTool: Tool = {
           notify(entry, `${entry.agent} crashed: ${err.message}`);
         }
       })();
-
     } catch (err: any) {
       entry.status = "failed";
       entry.finishedAt = new Date();
       runningAgents.set(id, entry);
-      return { output: `Failed to spawn ${input.agent}: ${err.message}`, isError: true };
+      return {
+        output: `Failed to spawn ${input.agent}: ${err.message}`,
+        isError: true,
+      };
     }
 
     return {
@@ -330,7 +408,8 @@ export const spawnCodingAgentTool: Tool = {
 
 export const codingAgentStatusTool: Tool = {
   name: "coding_agent_status",
-  description: "Check status and recent output of running or completed coding agents.",
+  description:
+    "Check status and recent output of running or completed coding agents.",
   parameters: {
     type: "object",
     properties: {
@@ -351,15 +430,19 @@ export const codingAgentStatusTool: Tool = {
 
     if (input.id) {
       const entry = runningAgents.get(input.id);
-      if (!entry) return { output: `No agent found with id #${input.id}`, isError: true };
+      if (!entry)
+        return { output: `No agent found with id #${input.id}`, isError: true };
       return { output: formatAgentStatus(entry, tailLen) };
     }
 
-    if (runningAgents.size === 0) return { output: "No coding agents have been spawned." };
+    if (runningAgents.size === 0)
+      return { output: "No coding agents have been spawned." };
 
     const sorted = [...runningAgents.values()].sort((a, b) => b.id - a.id);
     return {
-      output: sorted.map((e) => formatAgentStatus(e, tailLen)).join("\n\n---\n\n"),
+      output: sorted
+        .map((e) => formatAgentStatus(e, tailLen))
+        .join("\n\n---\n\n"),
     };
   },
 };
@@ -378,8 +461,10 @@ export const killCodingAgentTool: Tool = {
 
   async execute(input: { id: number }): Promise<ToolResult> {
     const entry = runningAgents.get(input.id);
-    if (!entry) return { output: `No agent found with id #${input.id}`, isError: true };
-    if (entry.status !== "running") return { output: `Agent #${input.id} is already ${entry.status}` };
+    if (!entry)
+      return { output: `No agent found with id #${input.id}`, isError: true };
+    if (entry.status !== "running")
+      return { output: `Agent #${input.id} is already ${entry.status}` };
 
     try {
       entry.process?.kill();
@@ -387,14 +472,18 @@ export const killCodingAgentTool: Tool = {
       entry.finishedAt = new Date();
       return { output: `Agent #${input.id} (${entry.agent}) killed.` };
     } catch (err: any) {
-      return { output: `Failed to kill agent #${input.id}: ${err.message}`, isError: true };
+      return {
+        output: `Failed to kill agent #${input.id}: ${err.message}`,
+        isError: true,
+      };
     }
   },
 };
 
 export const listCodingAgentsTool: Tool = {
   name: "list_coding_agents",
-  description: "List available external coding agents and whether they are installed.",
+  description:
+    "List available external coding agents and whether they are installed.",
   parameters: { type: "object", properties: {} },
   risk: "low",
 
@@ -413,7 +502,9 @@ export const listCodingAgentsTool: Tool = {
 };
 
 function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
-  const elapsed = formatDuration((entry.finishedAt || new Date()).getTime() - entry.startedAt.getTime());
+  const elapsed = formatDuration(
+    (entry.finishedAt || new Date()).getTime() - entry.startedAt.getTime(),
+  );
   const lines = [
     `#${entry.id} [${entry.status.toUpperCase()}] ${entry.agent}`,
     `Prompt: ${entry.prompt.slice(0, 200)}`,
@@ -433,7 +524,9 @@ function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
     }
     const uniqueTools = [...new Set(entry.toolsUsed)];
     if (uniqueTools.length > 0) {
-      lines.push(`Tools used: ${uniqueTools.slice(-10).join(", ")}${uniqueTools.length > 10 ? "..." : ""}`);
+      lines.push(
+        `Tools used: ${uniqueTools.slice(-10).join(", ")}${uniqueTools.length > 10 ? "..." : ""}`,
+      );
     }
   }
 
@@ -460,13 +553,15 @@ function formatAgentStatus(entry: RunningAgent, tailLen: number): string {
 
   const output = entry.stdout.trim();
   if (output) {
-    const tail = output.length > tailLen ? "...\n" + output.slice(-tailLen) : output;
+    const tail =
+      output.length > tailLen ? "...\n" + output.slice(-tailLen) : output;
     lines.push(`\nOutput:\n${tail}`);
   }
 
   const errors = entry.stderr.trim();
   if (errors) {
-    const tail = errors.length > tailLen ? "...\n" + errors.slice(-tailLen) : errors;
+    const tail =
+      errors.length > tailLen ? "...\n" + errors.slice(-tailLen) : errors;
     lines.push(`\nStderr:\n${tail}`);
   }
 
@@ -561,19 +656,26 @@ function extractSummary(entry: RunningAgent, raw: string): string {
       const meta: string[] = [];
       if (resultEvent.is_error) meta.push("[error]");
       if (entry.totalCostUsd || resultEvent.total_cost_usd) {
-        meta.push(`Cost: $${(entry.totalCostUsd || resultEvent.total_cost_usd).toFixed(4)}`);
+        meta.push(
+          `Cost: $${(entry.totalCostUsd || resultEvent.total_cost_usd).toFixed(4)}`,
+        );
       }
       const turns = entry.turnCount || resultEvent.num_turns;
       if (turns) meta.push(`${turns} turns`);
-      if (resultEvent.duration_ms) meta.push(formatDuration(resultEvent.duration_ms));
+      if (resultEvent.duration_ms)
+        meta.push(formatDuration(resultEvent.duration_ms));
       if (entry.sessionId || resultEvent.session_id) {
-        meta.push(`Session: ${(entry.sessionId || resultEvent.session_id).slice(0, 8)}...`);
+        meta.push(
+          `Session: ${(entry.sessionId || resultEvent.session_id).slice(0, 8)}...`,
+        );
       }
 
       // Show tools used if any
       const uniqueTools = [...new Set(entry.toolsUsed)];
       if (uniqueTools.length > 0) {
-        meta.push(`Tools: ${uniqueTools.slice(0, 8).join(", ")}${uniqueTools.length > 8 ? "..." : ""}`);
+        meta.push(
+          `Tools: ${uniqueTools.slice(0, 8).join(", ")}${uniqueTools.length > 8 ? "..." : ""}`,
+        );
       }
 
       const metaLine = meta.length ? meta.join(" | ") + "\n\n" : "";
@@ -587,10 +689,12 @@ function extractSummary(entry: RunningAgent, raw: string): string {
       const json = JSON.parse(raw);
       const meta: string[] = [];
       if (json.is_error) meta.push("[error]");
-      if (json.total_cost_usd) meta.push(`Cost: $${json.total_cost_usd.toFixed(4)}`);
+      if (json.total_cost_usd)
+        meta.push(`Cost: $${json.total_cost_usd.toFixed(4)}`);
       if (json.num_turns) meta.push(`${json.num_turns} turns`);
       if (json.duration_ms) meta.push(formatDuration(json.duration_ms));
-      if (json.session_id) meta.push(`Session: ${json.session_id.slice(0, 8)}...`);
+      if (json.session_id)
+        meta.push(`Session: ${json.session_id.slice(0, 8)}...`);
       const metaLine = meta.length ? meta.join(" | ") + "\n\n" : "";
       const content = json.result || "";
       const full = metaLine + content;
@@ -620,7 +724,9 @@ function formatDuration(ms: number): string {
 export function killAllCodingAgents() {
   for (const entry of runningAgents.values()) {
     if (entry.status === "running") {
-      try { entry.process?.kill(); } catch {}
+      try {
+        entry.process?.kill();
+      } catch {}
       entry.status = "failed";
       entry.finishedAt = new Date();
     }
@@ -694,7 +800,9 @@ export function restoreRunningAgents(): number {
   }
 
   // Clean up the file immediately
-  try { unlinkSync(path); } catch {}
+  try {
+    unlinkSync(path);
+  } catch {}
 
   let restored = 0;
   for (const p of persisted) {
@@ -746,11 +854,16 @@ function monitorPid(pid: number, entry: RunningAgent) {
     } catch {
       // Process exited
       entry.finishedAt = new Date();
-      const duration = formatDuration(entry.finishedAt.getTime() - entry.startedAt.getTime());
+      const duration = formatDuration(
+        entry.finishedAt.getTime() - entry.startedAt.getTime(),
+      );
 
       // We don't know the exit code, assume success if it ran this long
       entry.status = "completed";
-      notify(entry, `Done — ${entry.agent} #${entry.id} finished in ${duration}.\n\n(Agent was running during restart, output not available)`);
+      notify(
+        entry,
+        `Done — ${entry.agent} #${entry.id} finished in ${duration}.\n\n(Agent was running during restart, output not available)`,
+      );
     }
   };
 
@@ -758,4 +871,9 @@ function monitorPid(pid: number, entry: RunningAgent) {
   setTimeout(check, 1000);
 }
 
-export const codingAgentTools = [spawnCodingAgentTool, codingAgentStatusTool, killCodingAgentTool, listCodingAgentsTool];
+export const codingAgentTools = [
+  spawnCodingAgentTool,
+  codingAgentStatusTool,
+  killCodingAgentTool,
+  listCodingAgentsTool,
+];

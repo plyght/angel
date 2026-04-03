@@ -29,7 +29,10 @@ export async function initMcpServers(config: AngelConfig): Promise<Tool[]> {
   return allTools;
 }
 
-async function connectMcpServer(name: string, config: McpServerConfig): Promise<Tool[]> {
+async function connectMcpServer(
+  name: string,
+  config: McpServerConfig,
+): Promise<Tool[]> {
   const proc = Bun.spawn([config.command, ...(config.args || [])], {
     stdin: "pipe",
     stdout: "pipe",
@@ -40,7 +43,7 @@ async function connectMcpServer(name: string, config: McpServerConfig): Promise<
   const server: McpServer = { name, process: proc, tools: [] };
   servers.set(name, server);
 
-  const initResponse = await sendMcpRequest(proc, "initialize", {
+  const _initResponse = await sendMcpRequest(proc, "initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
     clientInfo: { name: "angel", version: "0.1.0" },
@@ -57,13 +60,16 @@ async function connectMcpServer(name: string, config: McpServerConfig): Promise<
     parameters: t.inputSchema || { type: "object", properties: {} },
     risk: "medium" as const,
 
-    async execute(input: any, ctx: ToolContext): Promise<ToolResult> {
+    async execute(input: any, _ctx: ToolContext): Promise<ToolResult> {
       try {
         const result = await sendMcpRequest(proc, "tools/call", {
           name: t.name,
           arguments: input,
         });
-        const text = result?.content?.map((c: any) => c.text || JSON.stringify(c)).join("\n") || "No output";
+        const text =
+          result?.content
+            ?.map((c: any) => c.text || JSON.stringify(c))
+            .join("\n") || "No output";
         return { output: text };
       } catch (err: any) {
         return { output: `MCP error: ${err.message}`, isError: true };
@@ -72,7 +78,11 @@ async function connectMcpServer(name: string, config: McpServerConfig): Promise<
   }));
 }
 
-async function sendMcpRequest(proc: any, method: string, params: any): Promise<any> {
+async function sendMcpRequest(
+  proc: any,
+  method: string,
+  params: any,
+): Promise<any> {
   const id = requestId++;
   const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
 
@@ -113,7 +123,11 @@ async function sendMcpRequest(proc: any, method: string, params: any): Promise<a
   });
 }
 
-async function sendMcpNotification(proc: any, method: string, params: any): Promise<void> {
+async function sendMcpNotification(
+  proc: any,
+  method: string,
+  params: any,
+): Promise<void> {
   const msg = JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n";
   const writer = proc.stdin.getWriter();
   await writer.write(new TextEncoder().encode(msg));
