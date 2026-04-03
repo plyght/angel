@@ -257,7 +257,18 @@ function buildSystemPrompt(
   // Message splitting guidance
   parts.push(
     `<message_formatting>
-If your response naturally divides into distinct parts that would read better as separate messages (e.g., answering different questions, first a quick answer then details, or a list followed by commentary), you can use ---MSG--- as a separator. Each segment will be sent as its own message. Use this sparingly — only when multiple messages genuinely improve readability. Most responses should remain a single message.
+If your response naturally divides into distinct parts that would read better as separate messages (e.g., answering different questions, first a quick answer then details, or a list followed by commentary), you can split it using ---MSG--- on its own line. Each segment will be sent as its own message. Use this sparingly — only when multiple messages genuinely improve readability. Most responses should remain a single message.
+
+The delimiter must appear on its own line to work:
+Good (will split):
+First message here.
+
+---MSG---
+
+Second message here.
+
+Bad (will NOT split, stays as one message):
+You can use ---MSG--- to split messages.
 </message_formatting>`,
   );
 
