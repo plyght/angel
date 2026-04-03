@@ -194,6 +194,8 @@ The `account` field is your Angel bot's phone number (the one you registered wit
 
 **Group chat security**: In Signal group chats, Angel only responds when mentioned. The `allowed_numbers` check is enforced **per-sender**, not per-group—meaning even if an unauthorized user mentions Angel in a group chat, their message is blocked. Only users whose phone numbers appear in `allowed_numbers` can trigger the bot, regardless of whether the conversation is a direct message or a group chat.
 
+**Reactions**: Angel detects emoji reactions sent via Signal. Reactions to Angel's messages are logged and stored in message history, providing context for future conversations (e.g., "User reacted 👍 to your message"). Reactions do not trigger immediate responses—they serve as passive feedback that Angel can reference in subsequent interactions. In group chats, only reactions to Angel's own messages are surfaced to reduce noise.
+
 Signal's servers relay messages, so your machine just needs to be on and running Angel.
 
 ### iMessage

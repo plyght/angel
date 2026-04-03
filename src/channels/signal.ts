@@ -93,6 +93,15 @@ export class SignalChannel implements ChannelAdapter {
     if (msg.method !== "receive") return;
 
     const envelope = msg.params?.envelope;
+
+    // Handle reaction events (separate from regular messages)
+    const reaction = envelope?.dataMessage?.reaction ||
+                     envelope?.syncMessage?.sentMessage?.reaction;
+    if (reaction) {
+      await this.handleReaction(envelope, reaction);
+      return;
+    }
+
     if (!envelope?.dataMessage) return;
     if (envelope.dataMessage.attachments?.length) {
       console.log(`[angel] Signal attachments raw:`, JSON.stringify(envelope.dataMessage.attachments));
@@ -200,6 +209,75 @@ export class SignalChannel implements ChannelAdapter {
 
     this.handler(incoming).catch((err) =>
       console.error(`[angel] Signal handler error: ${err.message}`)
+    );
+  }
+
+  /**
+   * Handle incoming reaction events.
+   * Reactions are surfaced as informational context to the LLM.
+   */
+  private async handleReaction(envelope: any, reaction: any) {
+    if (!this.handler) return;
+
+    const sourceNumber = envelope.sourceNumber || envelope.source;
+    if (!this.allowedNumbers.has(sourceNumber || "")) {
+      console.log(`[angel] Signal: blocked reaction from unauthorized number ${sourceNumber}`);
+      return;
+    }
+
+    const sender = envelope.sourceName || sourceNumber || "Unknown";
+    const emoji = reaction.emoji || "";
+    const isRemove = reaction.isRemove || false;
+    const targetAuthor = reaction.targetAuthorNumber || reaction.targetAuthor || "someone";
+
+    // Determine if this reaction is on Angel's own message
+    const isReactionToSelf = targetAuthor === this.account;
+
+    // Determine the chat context (group or private)
+    const groupId = envelope.dataMessage?.groupInfo?.groupId ||
+                    envelope.syncMessage?.sentMessage?.groupInfo?.groupId;
+    const externalChatId = groupId || sourceNumber || "";
+    const chatType = groupId ? "signal_group" : "signal_private";
+
+    // Build informational text about the reaction
+    let text: string;
+    if (isRemove) {
+      if (isReactionToSelf) {
+        text = `[${sender} removed their ${emoji} reaction from your message]`;
+      } else {
+        text = `[${sender} removed their ${emoji} reaction from a message]`;
+      }
+    } else {
+      if (isReactionToSelf) {
+        text = `[${sender} reacted ${emoji} to your message]`;
+      } else {
+        text = `[${sender} reacted ${emoji} to a message from ${targetAuthor}]`;
+      }
+    }
+
+    console.log(`[angel] Signal reaction: ${text}`);
+
+    // In group chats, only surface reactions to Angel's own messages
+    // (to avoid noise from reactions to other people's messages)
+    if (groupId && !isReactionToSelf) {
+      return;
+    }
+
+    const incoming: IncomingMessage = {
+      externalChatId,
+      chatType,
+      senderName: sender,
+      text,
+      isGroupMention: false,
+      senderDmId: sourceNumber || undefined,
+      isReaction: true,
+      reactionEmoji: emoji,
+      reactionIsRemoval: isRemove,
+      reactionToSelf: isReactionToSelf,
+    };
+
+    this.handler(incoming).catch((err) =>
+      console.error(`[angel] Signal reaction handler error: ${err.message}`)
     );
   }
 

@@ -9,6 +9,14 @@ export interface IncomingMessage {
   isGroupMention?: boolean;
   senderDmId?: string;
   replyToMessageId?: string;
+  /** True if this message represents a reaction event rather than a text message */
+  isReaction?: boolean;
+  /** The emoji used in the reaction (when isReaction is true) */
+  reactionEmoji?: string;
+  /** True if this is a reaction removal rather than addition */
+  reactionIsRemoval?: boolean;
+  /** True if the reaction is on Angel's own message */
+  reactionToSelf?: boolean;
 }
 
 export type MessageHandler = (msg: IncomingMessage) => Promise<void>;

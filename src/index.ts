@@ -233,6 +233,16 @@ async function boot() {
 
     const chatId = upsertChat(db, channelKey, msg.externalChatId, msg.chatType, msg.senderName);
 
+    // Handle reactions: log them and store in message history for context,
+    // but don't trigger a full LLM response (reactions are informational)
+    if (msg.isReaction) {
+      console.log(`[angel] Received reaction in chat ${chatId}: ${msg.text}`);
+      // Store reaction as a user message for context in future turns
+      storeMessage(db, chatId, "user", msg.text, { senderName: msg.senderName });
+      // Don't process further - reactions don't need a response
+      return;
+    }
+
     const existing = activeChats.get(chatId);
     if (existing) {
       existing.abort();
