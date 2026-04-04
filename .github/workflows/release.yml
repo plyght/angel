@@ -231,9 +231,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check-version, build]
     if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch') && !failure()
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -241,8 +250,8 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Publish to npm with provenance
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         continue-on-error: true
