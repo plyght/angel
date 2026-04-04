@@ -41,6 +41,13 @@ export interface McpServerConfig {
   env?: Record<string, string>;
 }
 
+export interface RemoteConfig {
+  /** Tailscale hostname of the remote machine (e.g., "my-macbook") */
+  tailscale_host?: string;
+  /** Path to the tailscale binary (default: "tailscale") */
+  tailscale_bin?: string;
+}
+
 export interface AngelConfig {
   openai_api_key: string;
   anthropic_api_key?: string;
@@ -68,6 +75,7 @@ export interface AngelConfig {
   mcp_servers?: Record<string, McpServerConfig>;
   sandbox?: { mode: "none" | "subprocess" };
   safe_word?: string;
+  remote?: RemoteConfig;
 }
 
 const DEFAULT_DATA_DIR = join(homedir(), ".angel");
@@ -90,6 +98,10 @@ export const DEFAULTS: AngelConfig = {
     reflector_interval_ms: 15 * 60 * 1000,
     embedding_enabled: false,
     token_budget: 1500,
+  },
+  remote: {
+    tailscale_host: undefined,
+    tailscale_bin: "tailscale",
   },
 };
 

@@ -1,7 +1,13 @@
 import type { Tool, ToolContext, ToolResult } from "./registry";
+import { loadConfig } from "../config";
 
-const TAILSCALE_HOST = "mbpro14";
-const TAILSCALE_BIN = "tailscale";
+function getRemoteConfig() {
+  const cfg = loadConfig();
+  return {
+    host: cfg.remote?.tailscale_host,
+    bin: cfg.remote?.tailscale_bin || "tailscale",
+  };
+}
 
 const BLOCKED_REMOTE: [RegExp, string][] = [
   [/rm\s+(-rf?|--recursive)\s+[/~]/, "recursive rm on root/home"],
@@ -46,7 +52,7 @@ function scrubSecrets(output: string): string {
 export const remoteStatusTool: Tool = {
   name: "remote_status",
   description:
-    "Check if Nicholas's Mac (mbpro14) is online on the Tailscale network. Always call this before attempting remote_exec. Returns online/offline status and latency.",
+    "Check if the configured remote machine is online on the Tailscale network. Always call this before attempting remote_exec. Returns online/offline status and latency. Requires remote.tailscale_host to be configured.",
   parameters: {
     type: "object",
     properties: {},
@@ -54,9 +60,19 @@ export const remoteStatusTool: Tool = {
   risk: "low",
 
   async execute(_input: any, _ctx: ToolContext): Promise<ToolResult> {
+    const { host, bin } = getRemoteConfig();
+
+    if (!host) {
+      return {
+        output:
+          "Remote host not configured. Set remote.tailscale_host in your config file.",
+        isError: true,
+      };
+    }
+
     try {
       const proc = Bun.spawn(
-        [TAILSCALE_BIN, "ping", "--timeout=3s", "-c", "1", TAILSCALE_HOST],
+        [bin, "ping", "--timeout=3s", "-c", "1", host],
         {
           stdout: "pipe",
           stderr: "pipe",
@@ -76,11 +92,11 @@ export const remoteStatusTool: Tool = {
       if (exitCode === 0 && stdout.includes("pong")) {
         const latencyMatch = stdout.match(/in\s+([\d.]+)ms/);
         const latency = latencyMatch ? latencyMatch[1] + "ms" : "unknown";
-        return { output: `online — ${TAILSCALE_HOST} responded in ${latency}` };
+        return { output: `online — ${host} responded in ${latency}` };
       }
 
       return {
-        output: `offline — ${TAILSCALE_HOST} is not reachable on the tailnet`,
+        output: `offline — ${host} is not reachable on the tailnet`,
         metadata: { online: false },
       };
     } catch (err: any) {
@@ -95,13 +111,13 @@ export const remoteStatusTool: Tool = {
 export const remoteExecTool: Tool = {
   name: "remote_exec",
   description:
-    "Execute a command on Nicholas's Mac (mbpro14) via Tailscale SSH. The Mac must be online — check with remote_status first. Use this when asked to do something on the Mac: run commands, read files, check system state, etc. Some dangerous commands are blocked.",
+    "Execute a command on the configured remote machine via Tailscale SSH. The machine must be online — check with remote_status first. Use this when asked to do something on the remote machine: run commands, read files, check system state, etc. Some dangerous commands are blocked. Requires remote.tailscale_host to be configured.",
   parameters: {
     type: "object",
     properties: {
       command: {
         type: "string",
-        description: "The shell command to execute on the Mac",
+        description: "The shell command to execute on the remote machine",
       },
       timeout_ms: {
         type: "number",
@@ -116,6 +132,16 @@ export const remoteExecTool: Tool = {
     input: { command: string; timeout_ms?: number },
     _ctx: ToolContext,
   ): Promise<ToolResult> {
+    const { host, bin } = getRemoteConfig();
+
+    if (!host) {
+      return {
+        output:
+          "Remote host not configured. Set remote.tailscale_host in your config file.",
+        isError: true,
+      };
+    }
+
     const timeout = Math.min(input.timeout_ms || 30000, 120000);
 
     for (const [pattern, reason] of BLOCKED_REMOTE) {
@@ -126,7 +152,7 @@ export const remoteExecTool: Tool = {
 
     try {
       const proc = Bun.spawn(
-        [TAILSCALE_BIN, "ssh", TAILSCALE_HOST, "--", input.command],
+        [bin, "ssh", host, "--", input.command],
         {
           stdout: "pipe",
           stderr: "pipe",
@@ -153,7 +179,7 @@ export const remoteExecTool: Tool = {
       return {
         output: output.slice(0, 50000),
         isError: exitCode !== 0,
-        metadata: { exitCode, host: TAILSCALE_HOST },
+        metadata: { exitCode, host },
       };
     } catch (err: any) {
       return {
