@@ -1,0 +1,248 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'package.json'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rebuild (e.g. 0.1.0). Skips version check, tag, release creation — only builds and attaches binaries.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    name: Check for version bump
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+      prev_tag: ${{ steps.check.outputs.prev_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if version changed
+        id: check
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          PREV_VERSION=$(git show HEAD^:package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).version" 2>/dev/null || echo "0.0.0")
+          echo "Previous version: $PREV_VERSION"
+
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "Previous tag: $PREV_TAG"
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+          if git ls-remote --tags origin | grep -q "refs/tags/v$CURRENT_VERSION"; then
+            echo "Tag v$CURRENT_VERSION already exists, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          elif [ "$CURRENT_VERSION" != "$PREV_VERSION" ]; then
+            echo "Version changed from $PREV_VERSION to $CURRENT_VERSION"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "Version unchanged, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  generate-notes:
+    name: Generate AI release notes
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    outputs:
+      release_notes: ${{ steps.generate.outputs.notes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes from code diff
+        id: generate
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          PREV_TAG="${{ needs.check-version.outputs.prev_tag }}"
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "Getting diff from $PREV_TAG to HEAD"
+            DIFF=$(git diff "$PREV_TAG"..HEAD -- '*.ts' 'package.json' 2>/dev/null || echo "No diff available")
+          else
+            echo "No previous tag, getting diff from initial commit"
+            FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD)
+            DIFF=$(git diff "$FIRST_COMMIT"..HEAD -- '*.ts' 'package.json' 2>/dev/null || echo "No diff available")
+          fi
+
+          DIFF_LENGTH=${#DIFF}
+          if [ $DIFF_LENGTH -gt 80000 ]; then
+            DIFF="${DIFF:0:80000}... [truncated]"
+          fi
+
+          REQUEST=$(jq -n \
+            --arg diff "Generate release notes for version $VERSION of angel (an AI agent that connects to Discord, Slack, iMessage, and Signal with tool use, memory, and coding agents).\n\nCode diff:\n$DIFF" \
+            '{
+              "model": "gpt-4.1-mini",
+              "messages": [
+                {
+                  "role": "system",
+                  "content": "You generate release notes from code diffs. Rules:\n- No emojis\n- No title/header (release name already shown in GitHub UI)\n- Minimal, concise, yet comprehensive\n- Only include sections with actual changes (omit empty sections entirely)\n- Use markdown ## headers: Features, Fixes, Improvements, Breaking Changes\n- Focus on user-facing changes only, skip internal refactoring\n- If only version bump with no real changes, output exactly: Maintenance release."
+                },
+                {
+                  "role": "user",
+                  "content": $diff
+                }
+              ],
+              "max_completion_tokens": 2000
+            }')
+
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -d "$REQUEST")
+
+          NOTES=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+          if [ -z "$NOTES" ]; then
+            echo "API call failed or empty response, using fallback"
+            if [ -n "$PREV_TAG" ]; then
+              NOTES="## What's Changed
+
+          See the [full changelog](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION}) for details."
+            else
+              NOTES="## Release v${VERSION}
+
+          Initial release."
+            fi
+          fi
+
+          echo "$NOTES" > /tmp/release_notes.md
+
+          echo "notes<<NOTES_EOF" >> $GITHUB_OUTPUT
+          cat /tmp/release_notes.md >> $GITHUB_OUTPUT
+          echo "NOTES_EOF" >> $GITHUB_OUTPUT
+
+  create-tag:
+    name: Create release tag
+    runs-on: ubuntu-latest
+    needs: [check-version, generate-notes]
+    if: needs.check-version.outputs.should_release == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ needs.check-version.outputs.version }}" -m "Release v${{ needs.check-version.outputs.version }}"
+          git push origin "v${{ needs.check-version.outputs.version }}"
+
+  create-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: [check-version, generate-notes, create-tag]
+    if: needs.check-version.outputs.should_release == 'true'
+    steps:
+      - name: Create release with AI notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: v${{ needs.check-version.outputs.version }}
+          body: ${{ needs.generate-notes.outputs.release_notes }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build ${{ matrix.platform }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    needs: [check-version, create-release]
+    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            asset_name: angel-linux-x64
+
+          - os: ubuntu-latest
+            platform: linux
+            arch: arm64
+            asset_name: angel-linux-arm64
+
+          - os: macos-latest
+            platform: macos
+            arch: x64
+            asset_name: angel-macos-x64
+
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            asset_name: angel-macos-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build compiled binary
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] && [ "${{ matrix.platform }}" = "linux" ]; then
+            bun build src/index.ts --compile --target=bun-linux-arm64 --outfile ${{ matrix.asset_name }}
+          elif [ "${{ matrix.arch }}" = "x64" ] && [ "${{ matrix.platform }}" = "linux" ]; then
+            bun build src/index.ts --compile --target=bun-linux-x64 --outfile ${{ matrix.asset_name }}
+          elif [ "${{ matrix.arch }}" = "arm64" ] && [ "${{ matrix.platform }}" = "macos" ]; then
+            bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile ${{ matrix.asset_name }}
+          elif [ "${{ matrix.arch }}" = "x64" ] && [ "${{ matrix.platform }}" = "macos" ]; then
+            bun build src/index.ts --compile --target=bun-darwin-x64 --outfile ${{ matrix.asset_name }}
+          fi
+          chmod +x ${{ matrix.asset_name }}
+
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
+          files: ${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [check-version, build]
+    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch') && !failure()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        continue-on-error: true

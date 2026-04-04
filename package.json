@@ -1,9 +1,34 @@
 {
-  "name": "angel",
+  "name": "@inaplight/angel",
   "version": "0.1.0",
   "type": "module",
+  "description": "AI agent that connects to Discord, Slack, iMessage, and Signal with tool use, memory, and coding agents",
   "bin": {
     "angel": "src/index.ts"
+  },
+  "files": [
+    "src",
+    "angel.config.example.yaml",
+    "README.md",
+    "SOUL.md"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "chatbot",
+    "discord",
+    "slack",
+    "imessage",
+    "signal",
+    "bun"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/plyght/angel"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
   },
   "scripts": {
     "start": "bun run src/index.ts start",
