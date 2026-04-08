@@ -43,6 +43,14 @@ import { discoverSkills } from "./skills";
 import { bashTool } from "./tools/bash";
 import { browserTool } from "./tools/browser";
 import {
+  backgroundProcessTools,
+  killAllBackgroundProcesses,
+  persistBackgroundProcesses,
+  restoreBackgroundProcesses,
+  setBackgroundProcessDataDir,
+  setBackgroundProcessNotifier,
+} from "./tools/background_processes";
+import {
   codingAgentTools,
   killAllCodingAgents,
   persistRunningAgents,
@@ -219,6 +227,9 @@ async function boot() {
   // Set up coding agent persistence directory
   setCodingAgentDataDir(config.data_dir);
 
+  // Set up background process persistence directory
+  setBackgroundProcessDataDir(config.data_dir);
+
   registry.register(bashTool);
   registry.registerMany(fileTools);
   registry.registerMany(webTools);
@@ -230,6 +241,7 @@ async function boot() {
   registry.register(emitMessageTool);
   registry.register(browserTool);
   registry.registerMany(codingAgentTools);
+  registry.registerMany(backgroundProcessTools);
   registry.registerMany(confirmationTools);
   registry.registerMany(remoteTools);
 
@@ -334,9 +346,10 @@ async function boot() {
       const adapter = channels.get(msg.chatType.split("_")[0]);
       if (adapter) await adapter.sendText(msg.externalChatId, cmdResult.text);
       if (cmdResult.action === "restart") {
-        const persisted = persistRunningAgents();
+        const persistedAgents = persistRunningAgents();
+        const persistedProcesses = persistBackgroundProcesses();
         console.log(
-          `[angel] Restart requested. Preserving ${persisted} running coding agent(s)...`,
+          `[angel] Restart requested. Preserving ${persistedAgents} coding agent(s) and ${persistedProcesses} background process(es)...`,
         );
         await channels.stopAll();
         await shutdownMcpServers();
@@ -531,6 +544,30 @@ async function boot() {
     );
   }
 
+  // Set up background process notifier
+  setBackgroundProcessNotifier(async (proc, message) => {
+    const adapter = channels.get(proc.channel);
+    if (adapter && proc.externalChatId) {
+      try {
+        const maxLen = adapter.maxMessageLength || 4000;
+        const chunks = splitResponse(message, maxLen);
+        for (const chunk of chunks) {
+          await adapter.sendText(proc.externalChatId, chunk);
+        }
+      } catch (err: any) {
+        console.error(`[angel] Error notifying process exit: ${err.message}`);
+      }
+    }
+  });
+
+  // Restore any background processes that were running before restart
+  const restoredProcesses = restoreBackgroundProcesses();
+  if (restoredProcesses > 0) {
+    p.log.info(
+      `Restored ${color.cyan(String(restoredProcesses))} background process(es) from previous session`,
+    );
+  }
+
   startScheduler(db, config, registry, channels);
 
   p.log.success(
@@ -543,6 +580,7 @@ async function boot() {
   process.on("SIGINT", async () => {
     console.log("\n[angel] Shutting down...");
     killAllCodingAgents();
+    killAllBackgroundProcesses();
     await channels.stopAll();
     await shutdownMcpServers();
     process.exit(0);

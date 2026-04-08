@@ -40,7 +40,8 @@
     "lint": "bunx biome check src",
     "fix": "bunx biome check --fix src",
     "format": "bunx biome format --write src",
-    "build": "bun build src/index.ts --compile --outfile angel"
+    "build": "bun build src/index.ts --compile --outfile angel",
+    "test": "bun test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",
