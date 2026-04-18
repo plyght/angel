@@ -1,6 +1,6 @@
 {
   "name": "@inaplight/angel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "AI agent that connects to Discord, Slack, iMessage, and Signal with tool use, memory, and coding agents",
   "bin": {
