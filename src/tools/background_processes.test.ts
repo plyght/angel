@@ -1,12 +1,12 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  spawnBackgroundProcessTool,
   backgroundProcessOutputTool,
-  listBackgroundProcessesTool,
-  stopBackgroundProcessTool,
-  sendProcessInputTool,
-  killAllBackgroundProcesses,
   clearAllBackgroundProcesses,
+  killAllBackgroundProcesses,
+  listBackgroundProcessesTool,
+  sendProcessInputTool,
+  spawnBackgroundProcessTool,
+  stopBackgroundProcessTool,
 } from "./background_processes";
 import type { ToolContext } from "./registry";
 
@@ -253,7 +253,8 @@ describe("Security", () => {
     // The output buffer (recent lines section) should have the secret redacted
     expect(outputResult.output).toContain("[REDACTED]");
     // The "Recent output" section should not contain the raw secret
-    const recentOutputSection = outputResult.output.split("--- Recent output")[1] || "";
+    const recentOutputSection =
+      outputResult.output.split("--- Recent output")[1] || "";
     expect(recentOutputSection).not.toContain("sk-abcdefghij");
   });
 });

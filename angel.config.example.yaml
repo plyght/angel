@@ -16,6 +16,11 @@ channels:
 
   # imessage:
   #   enabled: true
+  #   imsg_path: "imsg"
+  #   service: "auto"   # auto | imessage | sms
+  #   region: "US"
+  #   allowed_handles:   # optional; if set, only these senders are accepted
+  #     - "+14155551212"
 
   # signal:
   #   enabled: true

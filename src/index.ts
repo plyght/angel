@@ -257,7 +257,14 @@ async function boot() {
   setSendMessageDeps(channels, db);
 
   if (config.channels.imessage?.enabled) {
-    channels.register(new iMessageChannel());
+    channels.register(
+      new iMessageChannel(
+        config.channels.imessage.imsg_path,
+        config.channels.imessage.service,
+        config.channels.imessage.region,
+        config.channels.imessage.allowed_handles,
+      ),
+    );
   }
   if (config.channels.discord?.enabled && config.channels.discord.token) {
     channels.register(

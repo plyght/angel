@@ -129,7 +129,10 @@ const MESSAGE_SEPARATOR_PATTERN = /(?:^|\n)\s*---MSG---\s*(?:\n|$)/;
  */
 export function splitResponse(text: string, maxLen: number): string[] {
   // First split on intentional message separators (only when on own line)
-  const segments = text.split(MESSAGE_SEPARATOR_PATTERN).map((s) => s.trim()).filter(Boolean);
+  const segments = text
+    .split(MESSAGE_SEPARATOR_PATTERN)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   // If no separators found (or only one segment), fall back to length-based splitting
   if (segments.length <= 1) {

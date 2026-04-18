@@ -242,7 +242,10 @@ export const spawnBackgroundProcessTool: Tool = {
           if (proc.exitCode === 0) {
             entry.status = "stopped";
             const displayName = entry.name || `${entry.command} (${entry.id})`;
-            notify(entry, `Process "${displayName}" exited cleanly after ${duration}.`);
+            notify(
+              entry,
+              `Process "${displayName}" exited cleanly after ${duration}.`,
+            );
           } else {
             entry.status = "failed";
             const displayName = entry.name || `${entry.command} (${entry.id})`;
@@ -302,9 +305,11 @@ export const backgroundProcessOutputTool: Tool = {
   },
   risk: "low",
 
-  async execute(
-    input: { id: number; lines?: number; include_stderr?: boolean },
-  ): Promise<ToolResult> {
+  async execute(input: {
+    id: number;
+    lines?: number;
+    include_stderr?: boolean;
+  }): Promise<ToolResult> {
     const entry = runningProcesses.get(input.id);
     if (!entry) {
       return {
@@ -344,7 +349,8 @@ export const listBackgroundProcessesTool: Tool = {
       },
       include_stopped: {
         type: "boolean",
-        description: "If true, include stopped/failed processes. Default: true.",
+        description:
+          "If true, include stopped/failed processes. Default: true.",
       },
     },
   },
@@ -463,7 +469,8 @@ export const sendProcessInputTool: Tool = {
       },
       input: {
         type: "string",
-        description: "Text to send to the process stdin (newline added automatically unless raw=true)",
+        description:
+          "Text to send to the process stdin (newline added automatically unless raw=true)",
       },
       raw: {
         type: "boolean",
@@ -474,9 +481,11 @@ export const sendProcessInputTool: Tool = {
   },
   risk: "medium",
 
-  async execute(
-    input: { id: number; input: string; raw?: boolean },
-  ): Promise<ToolResult> {
+  async execute(input: {
+    id: number;
+    input: string;
+    raw?: boolean;
+  }): Promise<ToolResult> {
     const entry = runningProcesses.get(input.id);
     if (!entry) {
       return {
@@ -673,7 +682,9 @@ export function restoreBackgroundProcesses(): number {
       channel: p.channel,
       externalChatId: p.externalChatId,
       name: p.name,
-      outputBuffer: ["(process restored after Angel restart - previous output not available)"],
+      outputBuffer: [
+        "(process restored after Angel restart - previous output not available)",
+      ],
       maxOutputLines: 1000,
     };
 

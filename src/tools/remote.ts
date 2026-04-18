@@ -1,5 +1,5 @@
-import type { Tool, ToolContext, ToolResult } from "./registry";
 import { loadConfig } from "../config";
+import type { Tool, ToolContext, ToolResult } from "./registry";
 
 function getRemoteConfig() {
   const cfg = loadConfig();
@@ -71,13 +71,10 @@ export const remoteStatusTool: Tool = {
     }
 
     try {
-      const proc = Bun.spawn(
-        [bin, "ping", "--timeout=3s", "-c", "1", host],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
+      const proc = Bun.spawn([bin, "ping", "--timeout=3s", "-c", "1", host], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
 
       const timer = setTimeout(() => proc.kill(), 5000);
 
@@ -151,13 +148,10 @@ export const remoteExecTool: Tool = {
     }
 
     try {
-      const proc = Bun.spawn(
-        [bin, "ssh", host, "--", input.command],
-        {
-          stdout: "pipe",
-          stderr: "pipe",
-        },
-      );
+      const proc = Bun.spawn([bin, "ssh", host, "--", input.command], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
 
       const timer = setTimeout(() => proc.kill(), timeout);
 

@@ -204,9 +204,16 @@ Signal's servers relay messages, so your machine just needs to be on and running
 channels:
   imessage:
     enabled: true
+    imsg_path: "imsg"   # optional
+    service: "auto"     # auto | imessage | sms
+    region: "US"        # phone normalization region
+    allowed_handles:     # optional hard allowlist (phone/email handles)
+      - "+14155551212"
 ```
 
-Requires macOS. Uses the local Messages database directly.
+Requires macOS and the [`imsg` CLI](https://github.com/steipete/imsg). Angel uses `imsg watch --json` for incoming messages and `imsg send` for outgoing messages.
+
+If `allowed_handles` is set, iMessage messages are denied by default unless the sender handle is explicitly allowlisted.
 
 ## Configuration
 

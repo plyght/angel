@@ -10,6 +10,10 @@ export interface ChannelConfig {
 
 export interface iMessageConfig extends ChannelConfig {
   service?: string;
+  imsg_path?: string;
+  region?: string;
+  /** Optional sender allowlist (phone numbers or handles). */
+  allowed_handles?: string[];
 }
 
 export interface DiscordConfig extends ChannelConfig {

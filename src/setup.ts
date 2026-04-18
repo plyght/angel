@@ -1,7 +1,6 @@
 import * as p from "@clack/prompts";
 import { existsSync, mkdirSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
+import { dirname } from "path";
 import color from "picocolors";
 import {
   type AngelConfig,
@@ -123,7 +122,7 @@ export async function runSetup(): Promise<void> {
       {
         value: "imessage",
         label: "iMessage",
-        hint: "macOS only, needs Full Disk Access",
+        hint: "macOS + imsg CLI",
       },
       { value: "signal", label: "Signal", hint: "requires signal-cli" },
     ],
@@ -201,21 +200,45 @@ export async function runSetup(): Promise<void> {
   }
 
   if (selectedChannels.includes("imessage")) {
-    const msgDb = join(homedir(), "Library", "Messages", "chat.db");
-    if (!existsSync(msgDb)) {
+    const defaultIMsgPath = existing?.channels?.imessage?.imsg_path || "imsg";
+    try {
+      const proc = Bun.spawn(["which", defaultIMsgPath], { stdout: "pipe" });
+      const path = (await new Response(proc.stdout).text()).trim();
+      if (path) {
+        p.log.success(`imsg found at ${path}`);
+      } else {
+        p.log.warn(
+          "imsg not found in PATH. Install from https://github.com/steipete/imsg or provide a custom path.",
+        );
+      }
+    } catch {
       p.log.warn(
-        "Messages database not found. You need to grant Full Disk Access to your terminal in System Settings → Privacy & Security → Full Disk Access.",
+        "Could not verify imsg in PATH. Ensure it is installed and executable.",
       );
-    } else {
-      p.log.success("Messages database found.");
+    }
+
+    const imsgPath = await p.text({
+      message: "imsg binary path",
+      initialValue: defaultIMsgPath,
+      placeholder: "imsg",
+      validate: (v) => {
+        if (!v?.trim()) return "Path is required";
+      },
+    });
+    if (p.isCancel(imsgPath)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
     }
 
     const service = await p.select({
-      message: "iMessage service",
-      initialValue: existing?.channels?.imessage?.service || "iMessage",
+      message: "Preferred send service",
+      initialValue: (
+        existing?.channels?.imessage?.service || "auto"
+      ).toLowerCase(),
       options: [
-        { value: "iMessage", label: "iMessage" },
-        { value: "SMS", label: "SMS" },
+        { value: "auto", label: "Auto" },
+        { value: "imessage", label: "iMessage" },
+        { value: "sms", label: "SMS" },
       ],
     });
     if (p.isCancel(service)) {
@@ -223,7 +246,42 @@ export async function runSetup(): Promise<void> {
       process.exit(0);
     }
 
-    channels.imessage = { enabled: true, service: service as string };
+    const region = await p.text({
+      message: "Phone normalization region",
+      initialValue: existing?.channels?.imessage?.region || "US",
+      placeholder: "US",
+      validate: (v) => {
+        if (!v?.trim()) return "Region is required";
+      },
+    });
+    if (p.isCancel(region)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    const allowedHandles = await p.text({
+      message: "Allowed iMessage handles (comma-separated, optional)",
+      initialValue:
+        existing?.channels?.imessage?.allowed_handles?.join(",") || "",
+      placeholder: "+14155551212,+14155552345",
+    });
+    if (p.isCancel(allowedHandles)) {
+      p.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    const parsedAllowedHandles = String(allowedHandles)
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    channels.imessage = {
+      enabled: true,
+      imsg_path: imsgPath as string,
+      service: service as string,
+      region: region as string,
+      allowed_handles: parsedAllowedHandles,
+    };
   }
 
   if (selectedChannels.includes("signal")) {

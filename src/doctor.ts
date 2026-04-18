@@ -1,7 +1,4 @@
 import * as p from "@clack/prompts";
-import { existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
 import color from "picocolors";
 import { configExists, configPath, loadConfig } from "./config";
 
@@ -56,11 +53,31 @@ export async function runDoctor(): Promise<void> {
   }
 
   if (config.channels.imessage?.enabled) {
-    const msgDb = join(homedir(), "Library", "Messages", "chat.db");
-    if (existsSync(msgDb)) {
-      p.log.success("iMessage: Messages DB accessible");
-    } else {
-      p.log.warn("iMessage: Messages DB not found (need Full Disk Access)");
+    const imsgPath = config.channels.imessage.imsg_path || "imsg";
+    try {
+      const which = Bun.spawn(["which", imsgPath], { stdout: "pipe" });
+      const path = (await new Response(which.stdout).text()).trim();
+      if (!path) {
+        p.log.warn(`iMessage: imsg not found (${imsgPath})`);
+      } else {
+        const ver = Bun.spawn([imsgPath, "--help"], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        await ver.exited;
+        p.log.success(`iMessage: imsg available at ${path}`);
+        const allowedCount =
+          config.channels.imessage.allowed_handles?.length ?? 0;
+        if (allowedCount > 0) {
+          p.log.info(`iMessage allowlist: ${allowedCount} handle(s)`);
+        } else {
+          p.log.warn(
+            "iMessage allowlist: not configured (all senders allowed)",
+          );
+        }
+      }
+    } catch {
+      p.log.warn(`iMessage: unable to execute imsg (${imsgPath})`);
     }
   }
 

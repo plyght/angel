@@ -1,128 +1,294 @@
-import { Database } from "bun:sqlite";
-import { existsSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import type { ChildProcess } from "bun";
 import type { ChannelAdapter, IncomingMessage, MessageHandler } from "./types";
 
-const MESSAGES_DB_PATH = join(homedir(), "Library", "Messages", "chat.db");
-const POLL_INTERVAL = 2000;
+type IMsgChat = {
+  id: number;
+  identifier?: string;
+  name?: string;
+};
+
+type IMsgWatchMessage = {
+  id?: number;
+  chat_id?: number;
+  sender?: string;
+  is_from_me?: boolean;
+  text?: string;
+};
+
+function normalizeService(service?: string): "imessage" | "sms" | "auto" {
+  const normalized = (service || "auto").toLowerCase();
+  if (normalized === "imessage") return "imessage";
+  if (normalized === "sms") return "sms";
+  if (normalized === "auto") return "auto";
+  // Back-compat with existing setup values.
+  if (service === "iMessage") return "imessage";
+  if (service === "SMS") return "sms";
+  return "auto";
+}
 
 export class iMessageChannel implements ChannelAdapter {
   name = "imessage";
   maxMessageLength = 100000;
+
   private handler: MessageHandler | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private lastRowId = 0;
-  private messagesDb: Database | null = null;
+  private watchProcess: ChildProcess | null = null;
+  private readonly imsgPath: string;
+  private readonly service: "imessage" | "sms" | "auto";
+  private readonly region: string;
+  private readonly chatsById = new Map<number, IMsgChat>();
+  private readonly allowedHandles: Set<string>;
+
+  constructor(
+    imsgPath = "imsg",
+    service?: string,
+    region = "US",
+    allowedHandles?: string[],
+  ) {
+    this.imsgPath = imsgPath;
+    this.service = normalizeService(service);
+    this.region = region;
+    this.allowedHandles = new Set(allowedHandles ?? []);
+  }
 
   async start(onMessage: MessageHandler) {
     this.handler = onMessage;
 
-    if (!existsSync(MESSAGES_DB_PATH)) {
+    const available = await this.checkIMsgAvailable();
+    if (!available) {
       console.error(
-        "[angel] iMessage: Messages database not found. Ensure Full Disk Access is granted.",
+        `[angel] iMessage: imsg not found at '${this.imsgPath}'. Install it or set channels.imessage.imsg_path.`,
       );
       return;
     }
 
-    try {
-      this.messagesDb = new Database(MESSAGES_DB_PATH, { readonly: true });
-      const latest = this.messagesDb
-        .query("SELECT MAX(ROWID) as max_id FROM message")
-        .get() as any;
-      this.lastRowId = latest?.max_id || 0;
+    await this.refreshChats();
+    this.startWatchProcess();
+  }
 
-      this.pollTimer = setInterval(() => this.poll(), POLL_INTERVAL);
-      console.log("[angel] iMessage: Polling started");
+  async stop() {
+    this.watchProcess?.kill();
+    this.watchProcess = null;
+  }
+
+  private async checkIMsgAvailable(): Promise<boolean> {
+    try {
+      const proc = Bun.spawn([this.imsgPath, "--help"], {
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      const code = await proc.exited;
+      return code === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private async refreshChats() {
+    try {
+      const proc = Bun.spawn(
+        [this.imsgPath, "chats", "--json", "--limit", "500"],
+        {
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+
+      const raw = (await new Response(proc.stdout).text()).trim();
+      await proc.exited;
+      if (!raw) return;
+
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line) as IMsgChat;
+          if (typeof parsed.id === "number") {
+            this.chatsById.set(parsed.id, parsed);
+          }
+        } catch {
+          // Ignore malformed lines.
+        }
+      }
     } catch (err: any) {
       console.error(
-        `[angel] iMessage: Failed to open database: ${err.message}`,
+        `[angel] iMessage: Failed to refresh chats: ${err.message}`,
       );
     }
   }
 
-  async stop() {
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    this.messagesDb?.close();
+  private startWatchProcess() {
+    this.watchProcess?.kill();
+
+    this.watchProcess = Bun.spawn(
+      [this.imsgPath, "watch", "--json", "--debounce", "250ms"],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+
+    this.readWatchStdout().catch((err: any) => {
+      console.error(`[angel] iMessage watch read error: ${err.message}`);
+    });
+
+    this.readWatchStderr().catch(() => {});
+
+    this.watchProcess.exited.then((code) => {
+      console.error(`[angel] iMessage watch exited with code ${code}`);
+    });
+
+    console.log("[angel] iMessage: imsg watch started");
   }
 
-  private async poll() {
-    if (!this.messagesDb || !this.handler) return;
+  private async readWatchStdout() {
+    if (!this.watchProcess?.stdout) return;
+
+    const reader = this.watchProcess.stdout.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        await this.handleWatchLine(line);
+      }
+    }
+  }
+
+  private async readWatchStderr() {
+    if (!this.watchProcess?.stderr) return;
+    const stderr = await new Response(this.watchProcess.stderr).text();
+    if (stderr.trim()) {
+      console.error(`[angel] iMessage watch stderr: ${stderr.trim()}`);
+    }
+  }
+
+  private async handleWatchLine(line: string) {
+    if (!this.handler) return;
+
+    let parsed: IMsgWatchMessage;
+    try {
+      parsed = JSON.parse(line) as IMsgWatchMessage;
+    } catch {
+      return;
+    }
+
+    if (parsed.is_from_me) return;
+    if (typeof parsed.chat_id !== "number") return;
+
+    const chat = this.chatsById.get(parsed.chat_id);
+    if (!chat) {
+      await this.refreshChats();
+    }
+
+    const refreshedChat = this.chatsById.get(parsed.chat_id);
+    const externalChatId = refreshedChat?.identifier || String(parsed.chat_id);
+    const isGroup = externalChatId.startsWith("chat");
+    const text = parsed.text?.trim() || "";
+
+    if (!text) return;
+
+    if (isGroup && !/\bangel\b/i.test(text)) {
+      return;
+    }
+
+    const sender = parsed.sender || "Unknown";
+
+    // Optional hard allowlist: block any sender not explicitly listed.
+    // Mirrors Signal's channel-specific sender gate behavior.
+    if (this.allowedHandles.size > 0 && !this.allowedHandles.has(sender)) {
+      console.log(
+        `[angel] iMessage: blocked message from unauthorized handle ${sender}`,
+      );
+      return;
+    }
+
+    const msg: IncomingMessage = {
+      externalChatId,
+      chatType: isGroup ? "imessage_group" : "imessage_private",
+      senderName: sender,
+      text,
+      isGroupMention: isGroup,
+      senderDmId: !isGroup ? sender : undefined,
+    };
 
     try {
-      const rows = this.messagesDb
-        .query(`
-        SELECT m.ROWID, m.text, m.is_from_me, m.date,
-               c.chat_identifier, c.display_name,
-               h.id as sender_id
-        FROM message m
-        JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-        JOIN chat c ON c.ROWID = cmj.chat_id
-        LEFT JOIN handle h ON h.ROWID = m.handle_id
-        WHERE m.ROWID > ? AND m.is_from_me = 0 AND m.text IS NOT NULL
-        ORDER BY m.ROWID ASC
-        LIMIT 10
-      `)
-        .all(this.lastRowId) as any[];
-
-      for (const row of rows) {
-        const isGroup = row.chat_identifier.startsWith("chat");
-        if (isGroup && !/\bangel\b/i.test(row.text)) {
-          this.lastRowId = row.ROWID;
-          continue;
-        }
-
-        const msg: IncomingMessage = {
-          externalChatId: row.chat_identifier,
-          chatType: isGroup ? "imessage_group" : "imessage_private",
-          senderName: row.sender_id || "Unknown",
-          text: row.text,
-          isGroupMention: isGroup,
-        };
-
-        try {
-          await this.handler(msg);
-          this.lastRowId = row.ROWID;
-        } catch (err: any) {
-          console.error(`[angel] iMessage handler error: ${err.message}`);
-          this.lastRowId = row.ROWID;
-        }
-      }
+      await this.handler(msg);
     } catch (err: any) {
-      console.error(`[angel] iMessage poll error: ${err.message}`);
+      console.error(`[angel] iMessage handler error: ${err.message}`);
     }
   }
 
   async sendText(externalChatId: string, text: string) {
-    const escaped = text.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    const isGroup = externalChatId.startsWith("chat");
-
-    let script: string;
-    if (isGroup) {
-      script = `
-        tell application "Messages"
-          set targetChat to a reference to chat id "${externalChatId}"
-          send "${escaped}" to targetChat
-        end tell
-      `;
-    } else {
-      script = `
-        tell application "Messages"
-          set targetService to 1st account whose service type = iMessage
-          set targetBuddy to participant "${externalChatId}" of targetService
-          send "${escaped}" to targetBuddy
-        end tell
-      `;
-    }
-
     try {
-      const proc = Bun.spawn(["osascript", "-e", script], {
+      const args = [
+        "send",
+        "--to",
+        externalChatId,
+        "--text",
+        text,
+        "--service",
+        this.service,
+        "--region",
+        this.region,
+      ];
+
+      const proc = Bun.spawn([this.imsgPath, ...args], {
         stdout: "pipe",
         stderr: "pipe",
       });
-      await proc.exited;
+      const code = await proc.exited;
+      if (code !== 0) {
+        const stderr = (await new Response(proc.stderr).text()).trim();
+        console.error(
+          `[angel] iMessage send error (code ${code}): ${stderr || "unknown error"}`,
+        );
+      }
     } catch (err: any) {
       console.error(`[angel] iMessage send error: ${err.message}`);
+    }
+  }
+
+  async sendAttachment(
+    externalChatId: string,
+    filePath: string,
+    caption?: string,
+  ) {
+    try {
+      const args = [
+        "send",
+        "--to",
+        externalChatId,
+        "--file",
+        filePath,
+        "--service",
+        this.service,
+        "--region",
+        this.region,
+      ];
+      if (caption?.trim()) {
+        args.push("--text", caption);
+      }
+
+      const proc = Bun.spawn([this.imsgPath, ...args], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const code = await proc.exited;
+      if (code !== 0) {
+        const stderr = (await new Response(proc.stderr).text()).trim();
+        console.error(
+          `[angel] iMessage send attachment error (code ${code}): ${stderr || "unknown error"}`,
+        );
+      }
+    } catch (err: any) {
+      console.error(`[angel] iMessage send attachment error: ${err.message}`);
     }
   }
 }
