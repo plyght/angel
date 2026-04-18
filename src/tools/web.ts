@@ -42,6 +42,7 @@ export const webSearchTool: Tool = {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`;
       const resp = await fetch(url, {
         headers: { "User-Agent": "Angel/1.0" },
+        signal: AbortSignal.timeout(15_000),
       });
       const html = await resp.text();
 
@@ -108,6 +109,7 @@ export const webFetchTool: Tool = {
       const resp = await fetch(input.url, {
         headers: { "User-Agent": "Angel/1.0" },
         redirect: "follow",
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!resp.ok) {

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
 import type { AngelConfig } from "./config";
 import { loadSession, logUsage, saveSession, storeMessage } from "./db";
@@ -349,11 +349,9 @@ function resolveWorkingDir(
 ): string {
   if (config.working_dir_isolation === "per_chat") {
     const dir = join(config.working_dir, channel, String(chatId));
-    const { mkdirSync, existsSync } = require("fs");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     return dir;
   }
-  const { mkdirSync, existsSync } = require("fs");
   if (!existsSync(config.working_dir))
     mkdirSync(config.working_dir, { recursive: true });
   return config.working_dir;

@@ -206,33 +206,9 @@ function migrationV1(db: Database) {
   `);
 }
 
-function migrationV2(db: Database) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS allowed_users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      channel TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      added_by TEXT DEFAULT 'config',
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(channel, user_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_allowed_channel ON allowed_users(channel);
-
-    CREATE TABLE IF NOT EXISTS pending_confirmations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      origin_chat_id INTEGER NOT NULL,
-      dm_chat_id INTEGER,
-      channel TEXT NOT NULL,
-      dm_id TEXT NOT NULL,
-      action_description TEXT NOT NULL,
-      tool_name TEXT NOT NULL,
-      tool_input TEXT NOT NULL,
-      status TEXT DEFAULT 'pending',
-      created_at TEXT DEFAULT (datetime('now')),
-      resolved_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_pending_status ON pending_confirmations(status, dm_id);
-  `);
+function migrationV2(_db: Database) {
+  // Tables already created in migrationV1 — this was a no-op duplicate.
+  // Kept as empty migration to preserve schema_version numbering.
 }
 
 export function upsertChat(

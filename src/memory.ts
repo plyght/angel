@@ -176,5 +176,7 @@ export function scheduleReflector(
   if (now - lastRun < config.memory.reflector_interval_ms) return;
 
   reflectorTimers.set(chatId, now);
-  runMemoryReflector(db, chatId, config, messages).catch(() => {});
+  runMemoryReflector(db, chatId, config, messages).catch((err) => {
+    console.error(`[angel] Memory reflector failed: ${err.message}`);
+  });
 }

@@ -204,6 +204,50 @@ export interface LlmResponse {
   usage: { inputTokens: number; outputTokens: number };
 }
 
+const MAX_LLM_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 1000;
+
+function isRetryable(err: any): boolean {
+  if (!err) return false;
+  const status = err.status || err.statusCode;
+  if (
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 529
+  )
+    return true;
+  const msg = String(err.message || "").toLowerCase();
+  return (
+    msg.includes("timeout") ||
+    msg.includes("econnreset") ||
+    msg.includes("socket hang up") ||
+    msg.includes("overloaded")
+  );
+}
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: any;
+  for (let attempt = 0; attempt < MAX_LLM_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      if (attempt < MAX_LLM_RETRIES - 1 && isRetryable(err)) {
+        const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
+        console.error(
+          `[angel] LLM request failed (attempt ${attempt + 1}/${MAX_LLM_RETRIES}): ${err.message}. Retrying in ${delay}ms...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function chatComplete(
   config: AngelConfig,
   messages: LlmMessage[],
@@ -217,45 +261,51 @@ export async function chatComplete(
   const model = opts?.model || config.model;
 
   if (isClaudeModel(model)) {
-    return claudeChatComplete(config, model, messages, tools, opts);
+    return withRetry(() =>
+      claudeChatComplete(config, model, messages, tools, opts),
+    );
   }
 
   const client = getOpenAIClient(config);
   const maxTokens = opts?.maxTokens || config.max_tokens;
 
   if (opts?.onTextDelta) {
-    return streamChatComplete(
-      client,
-      model,
-      messages,
-      tools,
-      maxTokens,
-      opts.onTextDelta,
+    return withRetry(() =>
+      streamChatComplete(
+        client,
+        model,
+        messages,
+        tools,
+        maxTokens,
+        opts.onTextDelta!,
+      ),
     );
   }
 
-  const response = await client.chat.completions.create({
-    model,
-    messages: messages as any,
-    tools: tools.length > 0 ? (tools as any) : undefined,
-    max_completion_tokens: maxTokens,
-  } as any);
+  return withRetry(async () => {
+    const response = await client.chat.completions.create({
+      model,
+      messages: messages as any,
+      tools: tools.length > 0 ? (tools as any) : undefined,
+      max_completion_tokens: maxTokens,
+    } as any);
 
-  const choice = response.choices[0];
+    const choice = response.choices[0];
 
-  return {
-    text: choice.message.content || "",
-    toolCalls: (choice.message.tool_calls || []).map((tc: any) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-    })),
-    finishReason: choice.finish_reason || "stop",
-    usage: {
-      inputTokens: response.usage?.prompt_tokens || 0,
-      outputTokens: response.usage?.completion_tokens || 0,
-    },
-  };
+    return {
+      text: choice.message.content || "",
+      toolCalls: (choice.message.tool_calls || []).map((tc: any) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      })),
+      finishReason: choice.finish_reason || "stop",
+      usage: {
+        inputTokens: response.usage?.prompt_tokens || 0,
+        outputTokens: response.usage?.completion_tokens || 0,
+      },
+    };
+  });
 }
 
 function extractFirstUserText(messages: LlmMessage[]): string {

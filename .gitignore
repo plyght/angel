@@ -6,3 +6,5 @@ bun.lock
 .env
 dist/
 angel
+angel.config.yaml
+angel.config.yml

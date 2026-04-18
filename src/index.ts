@@ -30,7 +30,7 @@ import { DiscordChannel } from "./channels/discord";
 import { iMessageChannel } from "./channels/imessage";
 import { SignalChannel } from "./channels/signal";
 import { SlackChannel } from "./channels/slack";
-import { ChannelRegistry, splitMessage, splitResponse } from "./channels/types";
+import { ChannelRegistry, splitResponse } from "./channels/types";
 import { handleCommand } from "./commands";
 import { getDb, storeMessage, upsertChat } from "./db";
 import { runDoctor } from "./doctor";
@@ -40,8 +40,6 @@ import { loadPlugins } from "./plugins";
 import { startScheduler } from "./scheduler";
 import { runSetup } from "./setup";
 import { discoverSkills } from "./skills";
-import { bashTool } from "./tools/bash";
-import { browserTool } from "./tools/browser";
 import {
   backgroundProcessTools,
   killAllBackgroundProcesses,
@@ -50,6 +48,8 @@ import {
   setBackgroundProcessDataDir,
   setBackgroundProcessNotifier,
 } from "./tools/background_processes";
+import { bashTool } from "./tools/bash";
+import { browserTool } from "./tools/browser";
 import {
   codingAgentTools,
   killAllCodingAgents,
@@ -60,18 +60,18 @@ import {
   setCodingAgentProgressNotifier,
 } from "./tools/coding_agents";
 import { confirmationTools } from "./tools/confirmation";
+import { emitMessageTool } from "./tools/emit_message";
 import { fileTools } from "./tools/files";
 import { memoryTools } from "./tools/memory";
 import { miscTools } from "./tools/misc";
 import { ToolRegistry } from "./tools/registry";
 import { remoteTools } from "./tools/remote";
 import { scheduleTools } from "./tools/schedule";
-import { emitMessageTool } from "./tools/emit_message";
 import { sendMessageTool, setSendMessageDeps } from "./tools/send_message";
 import { subagentTools } from "./tools/subagent";
 import { webTools } from "./tools/web";
 
-const VERSION = "0.1.0";
+const { version: VERSION } = require("../package.json");
 const args = process.argv.slice(2);
 const command = args[0] || "start";
 
@@ -579,10 +579,19 @@ async function boot() {
 
   process.on("SIGINT", async () => {
     console.log("\n[angel] Shutting down...");
-    killAllCodingAgents();
-    killAllBackgroundProcesses();
-    await channels.stopAll();
-    await shutdownMcpServers();
+    const forceExit = setTimeout(() => {
+      console.error("[angel] Graceful shutdown timed out, forcing exit.");
+      process.exit(1);
+    }, 10_000);
+    try {
+      killAllCodingAgents();
+      killAllBackgroundProcesses();
+      await channels.stopAll();
+      await shutdownMcpServers();
+    } catch (err: any) {
+      console.error(`[angel] Shutdown error: ${err.message}`);
+    }
+    clearTimeout(forceExit);
     process.exit(0);
   });
 }
