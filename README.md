@@ -1,5 +1,5 @@
 <div align="center">
-    <img src="asssets/weeping_angel.png" width="120" />
+    <img src="assets/weeping_angel.png" width="120" />
     <h3>Angel</h3>
     <p>Autonomous AI agent with multi-channel support, persistent memory, and an extensible tool system</p>
     <br/>
